@@ -1,0 +1,8 @@
+sentence_transformers
+Pillow
+faiss-cpu
+mysql-connector-python
+PyYAML
+SQLAlchemy
+flask
+simplejson
