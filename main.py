@@ -89,6 +89,19 @@ def get_shas_by_faiss_id(connection, faiss_ids):
     except Error as e:
         print("Error while retrieving last_insert", e)
 
+def get_numbers_by_faiss_id(connection, faiss_ids):
+    try:
+        if connection.is_connected():
+            cursor = connection.cursor()
+        formatted_ids = ", ".join([str(v) for v in faiss_ids])
+        query = """with a as (select o.*, f.faiss_id from faiss f left join ordinals o on f.sha256=o.sha256 where f.faiss_id in ({li}))
+                   select * from a where sequence_number in (select min(sequence_number) from a group by sha256) order by FIELD(faiss_id, {li})"""
+        cursor.execute(query.format(li=formatted_ids))
+        rows = cursor.fetchall()
+        return rows
+    except Error as e:
+        print("Error while retrieving numbers by faiss_id", e)
+
 
 # 2. Index functions
 def get_index(d):
@@ -212,6 +225,29 @@ def get_image_to_image_shas(index, conn, image_binary, n=5):
     zipped = list(map(lambda x, y: (x[0], x[1], float(y)), rows, D[0]))
     return zipped
 
+def get_text_to_inscription_numbers(index, conn, search_term, n=5):
+    t0 = time.time()
+    query_emb = model.encode([search_term])
+    D, I = index.search(query_emb, n)
+    t1 = time.time()
+    rows = get_numbers_by_faiss_id(conn, I[0])
+    zipped = list(map(lambda x, y: (x + (float(y),)), rows, D[0]))
+    t2 = time.time()
+    print("db: " + str(t2-t1) + ". index: " + str(t1-t0))
+    return zipped
+
+def get_image_to_inscription_numbers(index, conn, image_binary, n=5):
+    t0 = time.time()
+    image_stream = BytesIO(image_binary)
+    image_emb = model.encode([Image.open(image_stream)])
+    D, I = index.search(image_emb, n)
+    t1 = time.time()
+    rows = get_numbers_by_faiss_id(conn, I[0])
+    zipped = list(map(lambda x, y: (x + (float(y),)), rows, D[0]))
+    t2 = time.time()
+    print("db: " + str(t2-t1) + ". index: " + str(t1-t0))
+    return zipped
+
 config_path = os.getenv("DISCOVER_CONFIG_PATH")
 model = SentenceTransformer('clip-ViT-B-32')
 conn = get_db_connection(config_path)
@@ -224,6 +260,29 @@ print("indexing started")
 
 # Return types
 SearchResult = collections.namedtuple("SearchResult",["sha256", "faiss_id", "distance"])
+FullSearchResult = collections.namedtuple("FullSearchResult",
+                                          ["id",
+                                           "content_length",
+                                           "content_type",
+                                           "genesis_fee",
+                                           "genesis_height",
+                                           "genesis_transaction",
+                                           "pointer",
+                                           "number",
+                                           "sequence_number",
+                                           "parent",
+                                           "metaprotocol",
+                                           "embedded_metadata",
+                                           "sat",
+                                           "timestamp",
+                                           "sha256",
+                                           "text",
+                                           "is_json",
+                                           "is_maybe_json",
+                                           "is_bitmap_style",
+                                           "is_recursive",
+                                           "faiss_id",
+                                           "distance"])
 
 # App definition
 app = Flask(__name__)
@@ -236,8 +295,8 @@ def hello_world():
 
 @app.route("/search/<search_term>")
 def search(search_term):
-    res = get_text_to_image_shas(index, conn, search_term, 5)
-    named_tuple = [SearchResult(*tuple_) for tuple_ in res]
+    res = get_text_to_inscription_numbers(index, conn, search_term, 5)
+    named_tuple = [FullSearchResult(*tuple_) for tuple_ in res]
     response = app.response_class(
         response=simplejson.dumps(named_tuple),
         status=200,
@@ -249,8 +308,8 @@ def search(search_term):
 @app.route("/search_by_image", methods=['POST'])
 def search_by_image():
     image_binary = request.get_data()
-    res = get_image_to_image_shas(index, conn, image_binary, 5)
-    named_tuple = [SearchResult(*tuple_) for tuple_ in res]
+    res = get_image_to_inscription_numbers(index, conn, image_binary, 5)
+    named_tuple = [FullSearchResult(*tuple_) for tuple_ in res]
     response = app.response_class(
         response=simplejson.dumps(named_tuple),
         status=200,
@@ -265,4 +324,4 @@ def ntotal():
 
 
 if __name__ == "__main__":
-    app.run(host="127.0.0.1", port=4080, debug=True)
+    app.run(host="127.0.0.1", port=5080, debug=True)
