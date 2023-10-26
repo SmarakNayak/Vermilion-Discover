@@ -1,3 +1,4 @@
+import os
 import sys
 from sentence_transformers import SentenceTransformer, util
 from PIL import Image, UnidentifiedImageError
@@ -14,8 +15,8 @@ import simplejson
 import time
 
 # 1. DB functions
-def get_db_connection():
-    config = yaml.safe_load(open('ord.yaml'))
+def get_db_connection(config_path):
+    config = yaml.safe_load(open(config_path))
     db_config = make_url(config["db_connection_string"])
     conn = mysql.connect(host=db_config.host,
                          user=db_config.username,
@@ -197,8 +198,9 @@ def get_image_to_image_shas(index, conn, image_binary, n=5):
     zipped = list(map(lambda x, y: (x[0], x[1], float(y)), rows, D[0]))
     return zipped
 
+config_path = os.getenv("DISCOVER_CONFIG_PATH")
 model = SentenceTransformer('clip-ViT-B-32')
-conn = get_db_connection()
+conn = get_db_connection(config_path)
 create_faiss_mapping_table(conn)
 index = get_index(512)
 
