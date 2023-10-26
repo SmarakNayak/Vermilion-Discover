@@ -212,7 +212,8 @@ def get_image_to_image_shas(index, conn, image_binary, n=5):
     zipped = list(map(lambda x, y: (x[0], x[1], float(y)), rows, D[0]))
     return zipped
 
-config_path = os.getenv("DISCOVER_CONFIG_PATH")
+#config_path = os.getenv("DISCOVER_CONFIG_PATH") ##TODO: Environment variable messes up logging? Weird.
+config_path = os.path.join(os.path.expanduser("~"), "ord.yaml")
 model = SentenceTransformer('clip-ViT-B-32')
 conn = get_db_connection(config_path)
 create_faiss_mapping_table(conn)
