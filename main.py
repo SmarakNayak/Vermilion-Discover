@@ -136,6 +136,13 @@ def add_embeddings(index, model, db_conn, rows):
         except ValueError as e:
             print(str(e) + " - trying one at a time")
             add_embeddings_single(index, model, db_conn, rows)
+        except OSError as e:
+            print(str(e) + " - trying one at a time")
+            add_embeddings_single(index, model, db_conn, rows)
+        except:
+            e = sys.exc_info()[0]
+            print("Unknown Error: " + str(e) + " - trying one at a time")
+            add_embeddings_single(index, model, db_conn, rows)
 
 
 def add_embeddings_single(index, model, db_conn, rows):
@@ -161,6 +168,13 @@ def add_embeddings_single(index, model, db_conn, rows):
                 continue
             except ValueError as e:
                 print("ValueError: " + str(e) + " for sha256: " + sha256 + ". Skipping")
+                continue
+            except OSError as e:
+                print("OSError: " + str(e) + " for sha256: " + sha256 + ". Skipping")
+                continue
+            except:
+                e = sys.exc_info()[0]
+                print("Unknown Error: " + str(e) + " for sha256: " + sha256 + ". Skipping")
                 continue
 
 
