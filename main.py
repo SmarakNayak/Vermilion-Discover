@@ -13,8 +13,7 @@ import threading
 import collections
 import simplejson
 import time
-from sanic import Sanic
-from sanic import response
+
 class Discover:
     # 1. DB functions
     def get_db_connection(self, config_path):
@@ -284,56 +283,54 @@ FullSearchResult = collections.namedtuple("FullSearchResult",
                                            "faiss_id",
                                            "distance"])
 
-def create_app():
-    print("Creating app")
-    config_path = "ord.yaml"
-    # config_path = os.getenv("DISCOVER_CONFIG_PATH")
-    discover = Discover()
-    model = SentenceTransformer('clip-ViT-B-32')
-    index = discover.get_index(512)
-    conn = discover.get_db_connection(config_path)
-    discover.create_faiss_mapping_table(conn)
 
-    app = Sanic("DiscoverAPI")
-    app.ctx.discover = discover
-    app.ctx.model = model
-    app.ctx.index = index
-    app.ctx.conn = conn
-
-    return app
-
-
-app = create_app()
+print("Creating app")
+config_path = "ord.yaml"
+# config_path = os.getenv("DISCOVER_CONFIG_PATH")
+discover = Discover()
+model = SentenceTransformer('clip-ViT-B-32')
+index = discover.get_index(512)
+conn = discover.get_db_connection(config_path)
+discover.create_faiss_mapping_table(conn)
+app = Flask(__name__)
 
 @app.route("/")
-async def test(request):
-    return response.json({"test": True})
+async def hello_world():
+    return "Hello, World!"
 
 
 @app.route("/search/<search_term>")
-def search(request, search_term):
-    rows = app.ctx.discover.get_text_to_inscription_numbers(app.ctx.model, app.ctx.index, app.ctx.conn, search_term, 5)
+def search(search_term):
+    rows = discover.get_text_to_inscription_numbers(model, index, conn, search_term, 5)
     named_tuple = [FullSearchResult(*tuple_) for tuple_ in rows]
-    res = response.text(simplejson.dumps(named_tuple), content_type="application/json")
-    return res
+    response = app.response_class(
+        response=simplejson.dumps(named_tuple),
+        status=200,
+        mimetype='application/json'
+    )
+    return response
 
 
 @app.route("/search_by_image", methods=['POST'])
-def search_by_image(request):
-    image_binary = request.body()
-    rows = app.ctx.discover.get_image_to_inscription_numbers(app.ctx.model, app.ctx.index, app.ctx.conn, image_binary, 5)
+def search_by_image():
+    image_binary = request.get_data()
+    rows = discover.get_image_to_inscription_numbers(model, index, conn, image_binary, 5)
     named_tuple = [FullSearchResult(*tuple_) for tuple_ in rows]
-    res = response.text(simplejson.dumps(named_tuple), content_type="application/json")
-    return res
+    response = app.response_class(
+        response=simplejson.dumps(named_tuple),
+        status=200,
+        mimetype='application/json'
+    )
+    return response
 
 
 @app.route("/ntotal")
-def ntotal(request):
-    return str(app.ctx.index.ntotal)
+def ntotal():
+    return str(index.ntotal)
 
 
 if __name__ == '__main__':
     print("main hit")
-    index_thread = threading.Thread(target=app.ctx.discover.update_index, args=(app.ctx.index, app.ctx.conn, app.ctx.model))
+    index_thread = threading.Thread(target=discover.update_index, args=(index, conn, model))
     index_thread.start()
     app.run(host="0.0.0.0", port=4080)
