@@ -1,4 +1,3 @@
-import os
 import sys
 from sentence_transformers import SentenceTransformer, util
 from PIL import Image, UnidentifiedImageError
@@ -15,6 +14,8 @@ import simplejson
 import time
 
 class Discover:
+    stop_indexer = False
+
     # 1. DB functions
     def get_db_connection(self, config_path):
         config = yaml.safe_load(open(config_path))
@@ -206,6 +207,9 @@ class Discover:
         print("Indexer starting in background..")
         last_content_id = self.get_last_insert_content_id(conn, index.ntotal)
         while True:
+            if self.stop_indexer:
+                print("Exiting indexer")
+                break
             start_content_id = last_content_id + 1
             print(start_content_id)
             rows = self.get_image_list(conn, start_content_id)
@@ -216,6 +220,7 @@ class Discover:
             self.add_embeddings(index, model, conn, rows)
             self.write_index(index)
             last_content_id = rows[-1][0]
+        print("Indexer exited")
 
 
     def get_text_to_image_shas(self, index, conn, search_term, n=5):
@@ -334,3 +339,6 @@ if __name__ == '__main__':
     index_thread = threading.Thread(target=discover.update_index, args=(index, conn, model))
     index_thread.start()
     app.run(host="0.0.0.0", port=4080)
+    discover.stop_indexer = True
+    print("Flask exited, waiting on index thread to finish..")
+    index_thread.join()
