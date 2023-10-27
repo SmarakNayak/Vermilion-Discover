@@ -20,22 +20,28 @@ class Discover:
     stop_indexer = False
 
     # 1. DB functions
-    def get_db_connection(self, config_path):
+    def initialize_db_pool(self, config_path):
         config = yaml.safe_load(open(config_path))
         db_config = make_url(config["db_connection_string"])
         conn = mysql.connect(host=db_config.host,
                              user=db_config.username,
                              password=db_config.password,
                              port=db_config.port,
-                             database=db_config.database)
+                             database=db_config.database,
+                             pool_name="discover_pool",
+                             pool_size=25)
         return conn
+
+    def get_connection(self):
+        connection = mysql.connect(pool_name="discover_pool")
+        return connection
 
     def get_cursor(self, connection):
         try:
             if connection.is_connected():
                 cursor = connection.cursor(buffered=True)
             else:
-                connection.reconnect(attempts=3, delay=0.1)
+                connection.reconnect(attempts=3, delay=0)
                 cursor = connection.cursor(buffered=True)
         except:
             e = sys.exc_info()[0]
@@ -43,8 +49,9 @@ class Discover:
             return Error
         return cursor
 
-    def create_faiss_mapping_table(self, connection):
+    def create_faiss_mapping_table(self):
         try:
+            connection = self.get_connection()
             cursor = self.get_cursor(connection)
             cursor.execute("""CREATE TABLE IF NOT EXISTS faiss (
             sha256 varchar(80) not null primary key,
@@ -52,28 +59,35 @@ class Discover:
             INDEX index_id (faiss_id),
             INDEX sha256 (sha256)
             )""")
+            cursor.close()
+            connection.close()
         except Error as e:
             print("Error creating MySQL table", e)
 
 
-    def insert_faiss_mapping(self, connection, mappings):
+    def insert_faiss_mapping(self, mappings):
         try:
+            connection = self.get_connection()
             cursor = self.get_cursor(connection)
             query = "INSERT INTO faiss (sha256, faiss_id) VALUES (%s, %s) ON DUPLICATE KEY UPDATE faiss_id=VALUES(faiss_id)"
             cursor.executemany(query, mappings)
             connection.commit()
             cursor.close()
+            connection.close()
         except Error as e:
             print("Error inserting faiss id", e)
         except:
             print("unknown error")
 
 
-    def get_last_insert_content_id(self, connection, faiss_length):
+    def get_last_insert_content_id(self, faiss_length):
         try:
+            connection = self.get_connection()
             cursor = self.get_cursor(connection)
             cursor.execute('select content_id from content where sha256 in (select sha256 from faiss where faiss_id=%s)', (faiss_length-1,))
             row = cursor.fetchone()
+            cursor.close()
+            connection.close()
             if row is None:
                 return 0
             else:
@@ -81,34 +95,43 @@ class Discover:
         except Error as e:
             print("Error while retrieving last_insert", e)
 
-    def get_image_list(self, connection, start_number):
+    def get_image_list(self, start_number):
         try:
+            connection = self.get_connection()
             cursor = self.get_cursor(connection)
             cursor.execute('select content_id, sha256, content, content_type from content where content_id >= %s order by content_id limit 0, 100',(start_number,))
             rows = cursor.fetchall()
+            cursor.close()
+            connection.close()
             return rows
         except Error as e:
             print("Error while retrieving image list", e)
 
 
-    def get_shas_by_faiss_id(self, connection, faiss_ids):
+    def get_shas_by_faiss_id(self, faiss_ids):
         try:
+            connection = self.get_connection()
             cursor = self.get_cursor(connection)
             formatted_ids = ", ".join([str(v) for v in faiss_ids])
             cursor.execute('select sha256, faiss_id from faiss where faiss_id in ({li}) order by FIELD(faiss_id, {li})'.format(li=formatted_ids))
             rows = cursor.fetchall()
+            cursor.close()
+            connection.close()
             return rows
         except Error as e:
             print("Error while retrieving last_insert", e)
 
-    def get_numbers_by_faiss_id(self, connection, faiss_ids):
+    def get_numbers_by_faiss_id(self, faiss_ids):
         try:
+            connection = self.get_connection()
             cursor = self.get_cursor(connection)
             formatted_ids = ", ".join([str(v) for v in faiss_ids])
             query = """with a as (select o.*, f.faiss_id from faiss f left join ordinals o on f.sha256=o.sha256 where f.faiss_id in ({li}))
                        select * from a where sequence_number in (select min(sequence_number) from a group by sha256) order by FIELD(faiss_id, {li})"""
             cursor.execute(query.format(li=formatted_ids))
             rows = cursor.fetchall()
+            cursor.close()
+            connection.close()
             return rows
         except Error as e:
             print("Error while retrieving numbers by faiss_id", e)
@@ -125,7 +148,7 @@ class Discover:
         return index
 
 
-    def add_embeddings(self, index, model, db_conn, rows):
+    def add_embeddings(self, index, model, rows):
         image_list = []
         id_list = []
         next_faiss_id = index.ntotal
@@ -153,23 +176,23 @@ class Discover:
             try:
                 img_emb = model.encode(image_list)
                 index.add(img_emb)
-                self.insert_faiss_mapping(db_conn, id_list)
+                self.insert_faiss_mapping(id_list)
             except TypeError as e:
                 print(str(e) + " - trying one at a time")
-                self.add_embeddings_single(index, model, db_conn, rows)
+                self.add_embeddings_single(index, model, rows)
             except ValueError as e:
                 print(str(e) + " - trying one at a time")
-                self.add_embeddings_single(index, model, db_conn, rows)
+                self.add_embeddings_single(index, model, rows)
             except OSError as e:
                 print(str(e) + " - trying one at a time")
-                self.add_embeddings_single(index, model, db_conn, rows)
+                self.add_embeddings_single(index, model, rows)
             except:
                 e = sys.exc_info()[0]
                 print("Unknown Error: " + str(e) + " - trying one at a time")
-                self.add_embeddings_single(index, model, db_conn, rows)
+                self.add_embeddings_single(index, model, rows)
 
 
-    def add_embeddings_single(self, index, model, db_conn, rows):
+    def add_embeddings_single(self, index, model, rows):
         next_faiss_id = index.ntotal
         for row in rows:
             id = row[0]
@@ -182,7 +205,7 @@ class Discover:
                 try:
                     img_emb = model.encode([Image.open(image_stream)])
                     index.add(img_emb)
-                    self.insert_faiss_mapping(db_conn, [(sha256, faiss_id)])
+                    self.insert_faiss_mapping([(sha256, faiss_id)])
                     next_faiss_id += 1
                 except UnidentifiedImageError as e:
                     print("Couldn't open sha256: " + sha256 + ". Not a valid image")
@@ -206,59 +229,63 @@ class Discover:
         faiss.write_index(index, "index.bin")
 
 
-    def update_index(self, index, conn, model):
+    def update_index(self, index, model):
         print("Indexer starting in background..")
-        last_content_id = self.get_last_insert_content_id(conn, index.ntotal)
+        last_content_id = self.get_last_insert_content_id(index.ntotal)
         while True:
             if self.stop_indexer:
                 print("Exiting indexer")
                 break
             start_content_id = last_content_id + 1
             print(start_content_id)
-            rows = self.get_image_list(conn, start_content_id)
+            rows = self.get_image_list(start_content_id)
+            if rows is None:
+                print("Trying again in 60s")
+                time.sleep(60)
+                continue
             if len(rows) == 0:
                 print("index up to date, sleeping for 60s")
                 time.sleep(60)
                 continue
-            self.add_embeddings(index, model, conn, rows)
+            self.add_embeddings(index, model, rows)
             self.write_index(index)
             last_content_id = rows[-1][0]
         print("Indexer exited")
 
 
-    def get_text_to_image_shas(self, index, conn, search_term, n=5):
-        query_emb = self.model.encode([search_term])
+    def get_text_to_image_shas(self, model, index, search_term, n=5):
+        query_emb = model.encode([search_term])
         D, I = index.search(query_emb, n)
-        rows = self.get_shas_by_faiss_id(conn, I[0])
+        rows = self.get_shas_by_faiss_id(I[0])
         zipped = list(map(lambda x, y: (x[0], x[1], float(y)), rows, D[0]))
         return zipped
 
-    def get_image_to_image_shas(self, index, conn, image_binary, n=5):
+    def get_image_to_image_shas(self, model, index, image_binary, n=5):
         image_stream = BytesIO(image_binary)
-        image_emb = self.model.encode([Image.open(image_stream)])
+        image_emb = model.encode([Image.open(image_stream)])
         D, I = index.search(image_emb, n)
-        rows = self.get_shas_by_faiss_id(conn, I[0])
+        rows = self.get_shas_by_faiss_id(I[0])
         zipped = list(map(lambda x, y: (x[0], x[1], float(y)), rows, D[0]))
         return zipped
 
-    def get_text_to_inscription_numbers(self, model, index, conn, search_term, n=5):
+    def get_text_to_inscription_numbers(self, model, index, search_term, n=5):
         t0 = time.time()
         query_emb = model.encode([search_term])
         D, I = index.search(query_emb, n)
         t1 = time.time()
-        rows = self.get_numbers_by_faiss_id(conn, I[0])
+        rows = self.get_numbers_by_faiss_id(I[0])
         zipped = list(map(lambda x, y: (x + (float(y),)), rows, D[0]))
         t2 = time.time()
         print("db: " + str(t2-t1) + ". index: " + str(t1-t0))
         return zipped
 
-    def get_image_to_inscription_numbers(self, model, index, conn, image_binary, n=5):
+    def get_image_to_inscription_numbers(self, model, index, image_binary, n=5):
         t0 = time.time()
         image_stream = BytesIO(image_binary)
         image_emb = model.encode([Image.open(image_stream)])
         D, I = index.search(image_emb, n)
         t1 = time.time()
-        rows = self.get_numbers_by_faiss_id(conn, I[0])
+        rows = self.get_numbers_by_faiss_id(I[0])
         zipped = list(map(lambda x, y: (x + (float(y),)), rows, D[0]))
         t2 = time.time()
         print("db: " + str(t2-t1) + ". index: " + str(t1-t0))
@@ -298,8 +325,8 @@ config_path = "ord.yaml"
 discover = Discover()
 model = SentenceTransformer('clip-ViT-B-32')
 index = discover.get_index(512)
-conn = discover.get_db_connection(config_path)
-discover.create_faiss_mapping_table(conn)
+conn = discover.initialize_db_pool(config_path)
+discover.create_faiss_mapping_table()
 app = Flask(__name__)
 
 @app.route("/")
@@ -309,7 +336,7 @@ async def hello_world():
 
 @app.route("/search/<search_term>")
 def search(search_term):
-    rows = discover.get_text_to_inscription_numbers(model, index, conn, search_term, 5)
+    rows = discover.get_text_to_inscription_numbers(model, index, search_term, 5)
     named_tuple = [FullSearchResult(*tuple_) for tuple_ in rows]
     response = app.response_class(
         response=simplejson.dumps(named_tuple),
@@ -322,7 +349,7 @@ def search(search_term):
 @app.route("/search_by_image", methods=['POST'])
 def search_by_image():
     image_binary = request.get_data()
-    rows = discover.get_image_to_inscription_numbers(model, index, conn, image_binary, 5)
+    rows = discover.get_image_to_inscription_numbers(model, index, image_binary, 5)
     named_tuple = [FullSearchResult(*tuple_) for tuple_ in rows]
     response = app.response_class(
         response=simplejson.dumps(named_tuple),
@@ -339,7 +366,7 @@ def ntotal():
 
 if __name__ == '__main__':
     print("main hit")
-    index_thread = threading.Thread(target=discover.update_index, args=(index, conn, model))
+    index_thread = threading.Thread(target=discover.update_index, args=(index, model))
     index_thread.start()
     logger = logging.getLogger('waitress')
     logger.setLevel(logging.INFO)
