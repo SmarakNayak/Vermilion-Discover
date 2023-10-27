@@ -1,3 +1,4 @@
+import os
 import sys
 from sentence_transformers import SentenceTransformer, util
 from PIL import Image, UnidentifiedImageError
@@ -320,8 +321,9 @@ FullSearchResult = collections.namedtuple("FullSearchResult",
 
 
 print("Creating app")
-config_path = "ord.yaml"
-# config_path = os.getenv("DISCOVER_CONFIG_PATH")
+config_path = os.getenv("DISCOVER_CONFIG_PATH")
+if config_path is None:
+    config_path = "ord.yaml"
 discover = Discover()
 model = SentenceTransformer('clip-ViT-B-32')
 index = discover.get_index(512)
@@ -370,7 +372,11 @@ if __name__ == '__main__':
     index_thread.start()
     logger = logging.getLogger('waitress')
     logger.setLevel(logging.INFO)
-    waitress.serve(app, host="0.0.0.0", port=4080)
+    try:
+        PORT = sys.argv[1]
+    except IndexError:
+        PORT = 4080
+    waitress.serve(app, host="0.0.0.0", port=PORT)
     discover.stop_indexer = True
     print("Flask exited, waiting on index thread to finish..")
     index_thread.join()
