@@ -25,11 +25,22 @@ def get_db_connection(config_path):
                          database = db_config.database)
     return conn
 
-
-def create_faiss_mapping_table(connection):
+def get_cursor(connection):
     try:
         if connection.is_connected():
             cursor = connection.cursor()
+        else:
+            connection.reconnect(attempts=3, delay=0.1)
+            cursor = connection.cursor()
+    except:
+        e = sys.exc_info()[0]
+        print("Failed to get cursor" + str(e))
+        return Error
+    return cursor
+
+def create_faiss_mapping_table(connection):
+    try:
+        cursor = get_cursor(connection)
         cursor.execute("""CREATE TABLE IF NOT EXISTS faiss (
         sha256 varchar(80) not null primary key,
         faiss_id int unsigned not null,
@@ -42,8 +53,7 @@ def create_faiss_mapping_table(connection):
 
 def insert_faiss_mapping(connection, mappings):
     try:
-        if connection.is_connected():
-            cursor = connection.cursor()
+        cursor = get_cursor(connection)
         query = "INSERT INTO faiss (sha256, faiss_id) VALUES (%s, %s) ON DUPLICATE KEY UPDATE faiss_id=VALUES(faiss_id)"
         cursor.executemany(query, mappings)
         connection.commit()
@@ -56,8 +66,7 @@ def insert_faiss_mapping(connection, mappings):
 
 def get_last_insert_content_id(connection, faiss_length):
     try:
-        if connection.is_connected():
-            cursor = connection.cursor()
+        cursor = get_cursor(connection)
         cursor.execute('select content_id from content where sha256 in (select sha256 from faiss where faiss_id=%s)', (faiss_length-1,))
         row = cursor.fetchone()
         if row is None:
@@ -69,8 +78,7 @@ def get_last_insert_content_id(connection, faiss_length):
 
 def get_image_list(connection, start_number):
     try:
-        if connection.is_connected():
-            cursor = connection.cursor()
+        cursor = get_cursor(connection)
         cursor.execute('select content_id, sha256, content, content_type from content where content_id >= %s order by content_id limit 0, 100',(start_number,))
         rows = cursor.fetchall()
         return rows
@@ -80,8 +88,7 @@ def get_image_list(connection, start_number):
 
 def get_shas_by_faiss_id(connection, faiss_ids):
     try:
-        if connection.is_connected():
-            cursor = connection.cursor()
+        cursor = get_cursor(connection)
         formatted_ids = ", ".join([str(v) for v in faiss_ids])
         cursor.execute('select sha256, faiss_id from faiss where faiss_id in ({li}) order by FIELD(faiss_id, {li})'.format(li=formatted_ids))
         rows = cursor.fetchall()
@@ -91,8 +98,7 @@ def get_shas_by_faiss_id(connection, faiss_ids):
 
 def get_numbers_by_faiss_id(connection, faiss_ids):
     try:
-        if connection.is_connected():
-            cursor = connection.cursor()
+        cursor = get_cursor(connection)
         formatted_ids = ", ".join([str(v) for v in faiss_ids])
         query = """with a as (select o.*, f.faiss_id from faiss f left join ordinals o on f.sha256=o.sha256 where f.faiss_id in ({li}))
                    select * from a where sequence_number in (select min(sequence_number) from a group by sha256) order by FIELD(faiss_id, {li})"""
@@ -286,7 +292,6 @@ FullSearchResult = collections.namedtuple("FullSearchResult",
 
 # App definition
 app = Flask(__name__)
-
 
 @app.route("/")
 def hello_world():
