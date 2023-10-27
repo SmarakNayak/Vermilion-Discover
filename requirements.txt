@@ -6,5 +6,4 @@ PyYAML
 SQLAlchemy
 flask[async]
 simplejson
-gunicorn
 waitress
