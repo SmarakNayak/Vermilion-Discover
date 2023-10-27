@@ -4,6 +4,7 @@ faiss-cpu
 mysql-connector-python
 PyYAML
 SQLAlchemy
-flask
+flask[async]
 simplejson
 gunicorn
+waitress

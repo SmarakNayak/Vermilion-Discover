@@ -12,6 +12,9 @@ import threading
 import collections
 import simplejson
 import time
+import waitress
+import logging
+
 
 class Discover:
     stop_indexer = False
@@ -338,7 +341,9 @@ if __name__ == '__main__':
     print("main hit")
     index_thread = threading.Thread(target=discover.update_index, args=(index, conn, model))
     index_thread.start()
-    app.run(host="0.0.0.0", port=4080)
+    logger = logging.getLogger('waitress')
+    logger.setLevel(logging.INFO)
+    waitress.serve(app, host="0.0.0.0", port=4080)
     discover.stop_indexer = True
     print("Flask exited, waiting on index thread to finish..")
     index_thread.join()
