@@ -338,7 +338,8 @@ async def hello_world():
 
 @app.route("/search/<search_term>")
 def search(search_term):
-    rows = discover.get_text_to_inscription_numbers(model, index, search_term, 5)
+    n = request.args.get('n', default=9, type=int)
+    rows = discover.get_text_to_inscription_numbers(model, index, search_term, min(n, 100))
     named_tuple = [FullSearchResult(*tuple_) for tuple_ in rows]
     response = app.response_class(
         response=simplejson.dumps(named_tuple),
@@ -351,7 +352,8 @@ def search(search_term):
 @app.route("/search_by_image", methods=['POST'])
 def search_by_image():
     image_binary = request.get_data()
-    rows = discover.get_image_to_inscription_numbers(model, index, image_binary, 5)
+    n = request.args.get('n', default=9, type=int)
+    rows = discover.get_image_to_inscription_numbers(model, index, image_binary, min(n, 100))
     named_tuple = [FullSearchResult(*tuple_) for tuple_ in rows]
     response = app.response_class(
         response=simplejson.dumps(named_tuple),
