@@ -122,7 +122,7 @@ class Discover:
             row = cursor.fetchone()
             cursor.close()
             connection.close()
-            if row is None:
+            if row is None or row[0] is None:
                 return 0
             else:
                 return row[0]
