@@ -89,10 +89,8 @@ class Discover:
             row = cursor.fetchone()
             cursor.close()
             connection.close()
-            print(index.ntotal)
-            print(row)
-            if row is None:
-                last_faiss_id_in_db = 0
+            if row is None or row[0] is None:
+                last_faiss_id_in_db = -1
             else:
                 last_faiss_id_in_db = row[0]
             last_faiss_id_in_idx = index.ntotal-1
