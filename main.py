@@ -80,12 +80,45 @@ class Discover:
         except:
             print("unknown error")
 
-
-    def get_last_insert_content_id(self, faiss_length):
+    def reconcile_index_with_db(self, index):
+        print("Reconciling index & db..")
         try:
             connection = self.get_connection()
             cursor = self.get_cursor(connection)
-            cursor.execute('select content_id from content where sha256 in (select sha256 from faiss where faiss_id=%s)', (faiss_length-1,))
+            cursor.execute('select max(faiss_id) from faiss')
+            row = cursor.fetchone()
+            cursor.close()
+            connection.close()
+            if row is None:
+                last_faiss_id_in_db = 0
+            else:
+                last_faiss_id_in_db = row[0]
+            last_faiss_id_in_idx = index.ntotal-1
+            print("last_faiss_id_in_db: " + str(last_faiss_id_in_db) + " last_faiss_id_in_idx: " + str(last_faiss_id_in_idx))
+            if last_faiss_id_in_db > last_faiss_id_in_idx:
+                connection = self.get_connection()
+                cursor = self.get_cursor(connection)
+                cursor.execute('Delete from faiss where faiss_id>%s', (last_faiss_id_in_idx,))
+                row = cursor.fetchone()
+                print(row)
+                cursor.close()
+                connection.close()
+                print("Deleted extra faiss ids from db")
+            elif last_faiss_id_in_db < last_faiss_id_in_idx:
+                #index.remove([i for i in range(last_faiss_id_in_db+1, last_faiss_id_in_idx)])
+                print("Can't delete extra faiss entries from index, continuing as is. Consider reindexing")
+            else:
+                print("No reconciliation required")
+
+            return min(last_faiss_id_in_db, last_faiss_id_in_idx)
+        except Error as e:
+            print("Error while reconciling faiss_ids", e)
+
+    def get_last_insert_content_id(self):
+        try:
+            connection = self.get_connection()
+            cursor = self.get_cursor(connection)
+            cursor.execute('select max(content_id) from content where sha256 in (select sha256 from faiss)')
             row = cursor.fetchone()
             cursor.close()
             connection.close()
@@ -137,6 +170,17 @@ class Discover:
         except Error as e:
             print("Error while retrieving numbers by faiss_id", e)
 
+    def get_content_from_sha(self, sha256):
+        try:
+            connection = self.get_connection()
+            cursor = self.get_cursor(connection)
+            cursor.execute('select sha256, content, content_type from content where sha256=\"{sha}\"'.format(sha=sha256))
+            rows = cursor.fetchall()
+            cursor.close()
+            connection.close()
+            return rows
+        except Error as e:
+            print("Error while retrieving last_insert", e)
 
     # 2. Index functions
     def get_index(self, d):
@@ -232,7 +276,8 @@ class Discover:
 
     def update_index(self, index, model):
         print("Indexer starting in background..")
-        last_content_id = self.get_last_insert_content_id(index.ntotal)
+        self.reconcile_index_with_db(index)
+        last_content_id = self.get_last_insert_content_id()
         while True:
             if self.stop_indexer:
                 print("Exiting indexer")
@@ -291,6 +336,33 @@ class Discover:
         t2 = time.time()
         print("db: " + str(t2-t1) + ". index: " + str(t1-t0))
         return zipped
+
+    def get_similar_images(self, model, index, sha256, n=5):
+        t0 = time.time()
+        rows = self.get_content_from_sha(sha256)
+        binary_content = rows[0][1]
+        content_type = rows[0][2]
+        if "image/" in content_type and "svg" not in content_type:
+            t1 = time.time()
+            image_stream = BytesIO(binary_content)
+            try:
+                image = Image.open(image_stream)
+                image_emb = model.encode([image])
+                D, I = index.search(image_emb, n)
+                t2 = time.time()
+                rows = self.get_numbers_by_faiss_id(I[0])
+                zipped = list(map(lambda x, y: (x + (float(y),)), rows, D[0]))
+                t3 = time.time()
+                print("db1: " + str(t1 - t0) + ". index: " + str(t2 - t1) + ". db2: " + str(t3 - t2))
+                return zipped
+            except UnidentifiedImageError as e:
+                print("Couldn't open sha256: " + sha256 + ". Not a valid image")
+                return
+            except:
+                e = sys.exc_info()[0]
+                print(e)
+                return
+
 
 
 # Return types
@@ -362,6 +434,17 @@ def search_by_image():
     )
     return response
 
+@app.route("/similar/<sha256>")
+def similar(sha256):
+    n = request.args.get('n', default=9, type=int)
+    rows = discover.get_similar_images(model, index, sha256, min(n, 100))
+    named_tuple = [FullSearchResult(*tuple_) for tuple_ in rows]
+    response = app.response_class(
+        response=simplejson.dumps(named_tuple),
+        status=200,
+        mimetype='application/json'
+    )
+    return response
 
 @app.route("/ntotal")
 def ntotal():
