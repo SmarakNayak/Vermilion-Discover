@@ -286,6 +286,7 @@ class Discover:
         image_list = []
         id_list = []
         content_id_list = []
+        unscanned_moderation_details = []
         next_faiss_id = index.ntotal
         for row in rows:
             content_id = row[0]
@@ -300,11 +301,15 @@ class Discover:
                     content_id_list.append((content_id, sha256))
                 except UnidentifiedImageError as e:
                     print("Couldn't open sha256: " + sha256 + ". Not a valid image")
+                    unscanned_moderation_details.append((content_id, sha256, "UNKNOWN_AUTOMATED", "", 0))
                     continue
                 except:
                     e = sys.exc_info()[0]
                     print(e)
+                    unscanned_moderation_details.append((content_id, sha256, "UNKNOWN_AUTOMATED", "", 0))
                     continue
+            else:
+                unscanned_moderation_details.append((content_id, sha256, "SAFE_AUTOMATED", "", 0))
 
         if len(image_list) > 0:
             try:
@@ -317,6 +322,7 @@ class Discover:
                         id_list.append((content_id_sha[1], next_faiss_id))
                         next_faiss_id += 1
                     self.insert_faiss_mapping(id_list)
+                    self.insert_moderation_flag(unscanned_moderation_details)
             except TypeError as e:
                 print(str(e) + " - trying one at a time")
                 self.add_embeddings_single(index, model, rows)
@@ -338,7 +344,7 @@ class Discover:
             sha256 = row[1]
             binary_content = row[2]
             content_type = row[3]
-            if "image/" in content_type:
+            if "image/" in content_type and "svg" not in content_type:
                 faiss_id = next_faiss_id
                 image_stream = BytesIO(binary_content)
                 try:
@@ -351,20 +357,27 @@ class Discover:
                         next_faiss_id += 1
                 except UnidentifiedImageError as e:
                     print("Couldn't open sha256: " + sha256 + ". Not a valid image")
+                    self.insert_moderation_flag([(content_id, sha256, "UNKNOWN_AUTOMATED", "", 0)])
                     continue
                 except TypeError as e:
                     print("TypeError: " + str(e) + " for sha256: " + sha256 + ". Skipping")
+                    self.insert_moderation_flag([(content_id, sha256, "UNKNOWN_AUTOMATED", "", 0)])
                     continue
                 except ValueError as e:
                     print("ValueError: " + str(e) + " for sha256: " + sha256 + ". Skipping")
+                    self.insert_moderation_flag([(content_id, sha256, "UNKNOWN_AUTOMATED", "", 0)])
                     continue
                 except OSError as e:
                     print("OSError: " + str(e) + " for sha256: " + sha256 + ". Skipping")
+                    self.insert_moderation_flag([(content_id, sha256, "UNKNOWN_AUTOMATED", "", 0)])
                     continue
                 except:
                     e = sys.exc_info()[0]
                     print("Unknown Error: " + str(e) + " for sha256: " + sha256 + ". Skipping")
+                    self.insert_moderation_flag([(content_id, sha256, "UNKNOWN_AUTOMATED", "", 0)])
                     continue
+            else:
+                self.insert_moderation_flag([(content_id, sha256, "SAFE_AUTOMATED", "", 0)])
 
     def write_index(self, index):
         faiss.write_index(index, "index.bin")
