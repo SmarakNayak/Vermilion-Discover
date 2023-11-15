@@ -2,6 +2,7 @@ import os
 import sys
 from sentence_transformers import SentenceTransformer, util
 from PIL import Image, UnidentifiedImageError
+import torch
 import faiss
 import mysql.connector as mysql
 from mysql.connector import Error
@@ -15,6 +16,15 @@ import simplejson
 import time
 import waitress
 import logging
+
+
+class ImageEmbeddingContainer:
+    image_embeddings = None
+    content_id_sha_list = None
+
+    def __init__(self, image_embeddings, content_id_sha_list):
+        self.image_embeddings = image_embeddings
+        self.content_id_sha_list = content_id_sha_list
 
 
 class Discover:
@@ -65,6 +75,25 @@ class Discover:
         except Error as e:
             print("Error creating MySQL table", e)
 
+    def create_content_moderation_table(self):
+        try:
+            connection = self.get_connection()
+            cursor = self.get_cursor(connection)
+            cursor.execute("""CREATE TABLE IF NOT EXISTS content_moderation (            
+            content_id int unsigned not null UNIQUE,
+            sha256 varchar(80) not null primary key,
+            automated_moderation_flag varchar(40),
+            flagged_concept varchar(40),
+            cosine_distance double,
+            human_override_moderation_flag varchar(40),
+            human_override_reason varchar(80),
+            INDEX index_id (content_id),
+            INDEX sha256 (sha256)
+            )""")
+            cursor.close()
+            connection.close()
+        except Error as e:
+            print("Error creating MySQL table", e)
 
     def insert_faiss_mapping(self, mappings):
         try:
@@ -77,6 +106,21 @@ class Discover:
             connection.close()
         except Error as e:
             print("Error inserting faiss id", e)
+        except:
+            print("unknown error")
+
+    def insert_moderation_flag(self, moderation_details):
+        try:
+            connection = self.get_connection()
+            cursor = self.get_cursor(connection)
+            query = """INSERT INTO content_moderation (content_id, sha256, automated_moderation_flag, flagged_concept, cosine_distance) VALUES (%s, %s, %s, %s, %s) 
+            ON DUPLICATE KEY UPDATE content_id=VALUES(content_id), automated_moderation_flag=VALUES(automated_moderation_flag), flagged_concept=VALUES(flagged_concept), cosine_distance=VALUES(cosine_distance)"""
+            cursor.executemany(query, moderation_details)
+            connection.commit()
+            cursor.close()
+            connection.close()
+        except Error as e:
+            print("Error inserting moderation flags", e)
         except:
             print("unknown error")
 
@@ -99,8 +143,7 @@ class Discover:
                 connection = self.get_connection()
                 cursor = self.get_cursor(connection)
                 cursor.execute('Delete from faiss where faiss_id>%s', (last_faiss_id_in_idx,))
-                row = cursor.fetchone()
-                print(row)
+                connection.commit()
                 cursor.close()
                 connection.close()
                 print("Deleted extra faiss ids from db")
@@ -140,7 +183,6 @@ class Discover:
             return rows
         except Error as e:
             print("Error while retrieving image list", e)
-
 
     def get_shas_by_faiss_id(self, faiss_ids):
         try:
@@ -192,13 +234,61 @@ class Discover:
 
         return index
 
+    def nsfw_filter(self, model, embedding_container):
+        # List of standard NSFW concepts to filter out
+        concepts = ['sexual', 'nude', 'sex', '18+', 'naked', 'nsfw', 'porn', 'explicit content', 'uncensored', 'gore']
+        # List of special concepts, focusing on protecting images of minors
+        special_concepts = ["little girl", "little boy", "young child", "young girl", "young boy", "child", "teen"]
+        combined_concepts = concepts + special_concepts
+        concept_embeddings = model.encode(combined_concepts)
+        cos_scores = util.cos_sim(embedding_container.image_embeddings, concept_embeddings)
+
+        THRESHOLD = 0.27
+        # check if any concepts are above threshold
+        max_score = torch.amax(cos_scores, 1)
+        clean_index = (max_score < THRESHOLD).tolist()
+        nsfw_index = (max_score >= THRESHOLD).tolist()
+        max_score_index = torch.argmax(cos_scores, 1)
+        max_concepts = [combined_concepts[i] for i in max_score_index]
+
+        # update content moderation db
+        moderation_list = []
+        for i in range(len(embedding_container.content_id_sha_list)):
+            if max_score[i] >= THRESHOLD:
+                if max_score_index[i] <= 9:
+                    moderation_list.append((embedding_container.content_id_sha_list[i][0],
+                                            embedding_container.content_id_sha_list[i][1],
+                                            "BLOCKED_NSFW_AUTOMATED",
+                                            max_concepts[i],
+                                            float(max_score[i])))
+                else:
+                    moderation_list.append((embedding_container.content_id_sha_list[i][0],
+                                            embedding_container.content_id_sha_list[i][1],
+                                            "BLOCKED_MINOR_AUTOMATED",
+                                            max_concepts[i],
+                                            float(max_score[i])))
+            else:
+                moderation_list.append((embedding_container.content_id_sha_list[i][0],
+                                        embedding_container.content_id_sha_list[i][1],
+                                        "SAFE_AUTOMATED",
+                                        max_concepts[i],
+                                        float(max_score[i])))
+
+        self.insert_moderation_flag(moderation_list)
+
+        # only pass clean images
+        filtered_embeddings = embedding_container.image_embeddings[clean_index]
+        filtered_content_id_sha_list = [i for (i,v) in zip(embedding_container.content_id_sha_list, clean_index) if v]
+        filtered_container = ImageEmbeddingContainer(filtered_embeddings, filtered_content_id_sha_list)
+        return filtered_container
 
     def add_embeddings(self, index, model, rows):
         image_list = []
         id_list = []
+        content_id_list = []
         next_faiss_id = index.ntotal
         for row in rows:
-            id = row[0]
+            content_id = row[0]
             sha256 = row[1]
             binary_content = row[2]
             content_type = row[3]
@@ -207,6 +297,7 @@ class Discover:
                 image_stream = BytesIO(binary_content)
                 try:
                     image_list.append(Image.open(image_stream))
+                    content_id_list.append((content_id, sha256))
                 except UnidentifiedImageError as e:
                     print("Couldn't open sha256: " + sha256 + ". Not a valid image")
                     continue
@@ -214,14 +305,18 @@ class Discover:
                     e = sys.exc_info()[0]
                     print(e)
                     continue
-                id_list.append((sha256, faiss_id))
-                next_faiss_id += 1
 
         if len(image_list) > 0:
             try:
                 img_emb = model.encode(image_list)
-                index.add(img_emb)
-                self.insert_faiss_mapping(id_list)
+                embeddings_container = ImageEmbeddingContainer(img_emb, content_id_list)
+                filtered_container = self.nsfw_filter(model, embeddings_container)
+                if len(filtered_container.image_embeddings) > 0:
+                    index.add(filtered_container.image_embeddings)
+                    for content_id_sha in filtered_container.content_id_sha_list:
+                        id_list.append((content_id_sha[1], next_faiss_id))
+                        next_faiss_id += 1
+                    self.insert_faiss_mapping(id_list)
             except TypeError as e:
                 print(str(e) + " - trying one at a time")
                 self.add_embeddings_single(index, model, rows)
@@ -236,11 +331,10 @@ class Discover:
                 print("Unknown Error: " + str(e) + " - trying one at a time")
                 self.add_embeddings_single(index, model, rows)
 
-
     def add_embeddings_single(self, index, model, rows):
         next_faiss_id = index.ntotal
         for row in rows:
-            id = row[0]
+            content_id = row[0]
             sha256 = row[1]
             binary_content = row[2]
             content_type = row[3]
@@ -249,9 +343,12 @@ class Discover:
                 image_stream = BytesIO(binary_content)
                 try:
                     img_emb = model.encode([Image.open(image_stream)])
-                    index.add(img_emb)
-                    self.insert_faiss_mapping([(sha256, faiss_id)])
-                    next_faiss_id += 1
+                    embeddings_container = ImageEmbeddingContainer(img_emb, [(content_id, sha256)])
+                    filtered_container = self.nsfw_filter(model, embeddings_container)
+                    if len(filtered_container.image_embeddings) > 0:
+                        index.add(filtered_container.image_embeddings)
+                        self.insert_faiss_mapping([(sha256, faiss_id)])
+                        next_faiss_id += 1
                 except UnidentifiedImageError as e:
                     print("Couldn't open sha256: " + sha256 + ". Not a valid image")
                     continue
@@ -269,10 +366,8 @@ class Discover:
                     print("Unknown Error: " + str(e) + " for sha256: " + sha256 + ". Skipping")
                     continue
 
-
     def write_index(self, index):
         faiss.write_index(index, "index.bin")
-
 
     def update_index(self, index, model):
         print("Indexer starting in background..")
@@ -297,7 +392,6 @@ class Discover:
             self.write_index(index)
             last_content_id = rows[-1][0]
         print("Indexer exited")
-
 
     def get_text_to_image_shas(self, model, index, search_term, n=5):
         query_emb = model.encode([search_term])
