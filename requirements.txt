@@ -7,3 +7,4 @@ SQLAlchemy
 flask[async]
 simplejson
 waitress
+torch
