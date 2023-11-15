@@ -495,6 +495,7 @@ model = SentenceTransformer('clip-ViT-B-32')
 index = discover.get_index(512)
 conn = discover.initialize_db_pool(config_path)
 discover.create_faiss_mapping_table()
+discover.create_content_moderation_table()
 app = Flask(__name__)
 
 @app.route("/")
