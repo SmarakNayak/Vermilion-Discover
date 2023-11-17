@@ -166,7 +166,7 @@ class Discover:
             cursor.close()
             connection.close()
             if row is None or row[0] is None:
-                return 0
+                return -1
             else:
                 return row[0]
         except Error as e:
@@ -387,6 +387,7 @@ class Discover:
         self.reconcile_index_with_db(index)
         last_content_id = self.get_last_insert_content_id()
         while True:
+            time.sleep(1) #Helps with debugging for some reason
             if self.stop_indexer:
                 print("Exiting indexer")
                 break
