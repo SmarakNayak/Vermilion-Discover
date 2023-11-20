@@ -40,7 +40,7 @@ class Discover:
                              port=db_config.port,
                              database=db_config.database,
                              pool_name="discover_pool",
-                             pool_size=25)
+                             pool_size=10)
         return conn
 
     def get_connection(self):

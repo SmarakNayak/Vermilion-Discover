@@ -18,7 +18,7 @@ class Overrider:
                              port=db_config.port,
                              database=db_config.database,
                              pool_name="overrider_pool",
-                             pool_size=5)
+                             pool_size=1)
         return conn
 
     def get_connection(self):
@@ -100,7 +100,7 @@ overrider.insert_moderation_overrides(data)
 
 with open('override.csv') as f:
     next(f)
-    blocked_shas=[]
+    blocked_shas = []
     for line in csv.reader(f):
         sha = line[0]
         flag = line[1]
