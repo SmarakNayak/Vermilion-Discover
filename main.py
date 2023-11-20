@@ -80,14 +80,13 @@ class Discover:
             connection = self.get_connection()
             cursor = self.get_cursor(connection)
             cursor.execute("""CREATE TABLE IF NOT EXISTS content_moderation (            
-            content_id int unsigned not null UNIQUE,
+            content_id int unsigned,
             sha256 varchar(80) not null primary key,
             automated_moderation_flag varchar(40),
             flagged_concept varchar(40),
             cosine_distance double,
             human_override_moderation_flag varchar(40),
             human_override_reason varchar(80),
-            INDEX index_id (content_id),
             INDEX sha256 (sha256)
             )""")
             cursor.close()
@@ -121,6 +120,35 @@ class Discover:
             connection.close()
         except Error as e:
             print("Error inserting moderation flags", e)
+        except:
+            print("unknown error")
+
+    def insert_moderation_overrides(self, moderation_details):
+        try:
+            connection = self.get_connection()
+            cursor = self.get_cursor(connection)
+            query = """INSERT INTO content_moderation (sha256, human_override_moderation_flag, human_override_reason) VALUES (%s, %s, %s) 
+            ON DUPLICATE KEY UPDATE human_override_moderation_flag=VALUES(human_override_moderation_flag), human_override_reason=VALUES(human_override_reason)"""
+            cursor.executemany(query, moderation_details)
+            connection.commit()
+            cursor.close()
+            connection.close()
+        except Error as e:
+            print("Error inserting moderation overrides", e)
+        except:
+            print("unknown error")
+
+    def delete_blocked_content(self, blocked_shas):
+        try:
+            connection = self.get_connection()
+            cursor = self.get_cursor(connection)
+            query = 'UPDATE content SET content = null where sha256=%s'
+            cursor.executemany(query, blocked_shas)
+            connection.commit()
+            cursor.close()
+            connection.close()
+        except Error as e:
+            print("Error deleting blocked content", e)
         except:
             print("unknown error")
 
@@ -322,7 +350,6 @@ class Discover:
                         id_list.append((content_id_sha[1], next_faiss_id))
                         next_faiss_id += 1
                     self.insert_faiss_mapping(id_list)
-                    self.insert_moderation_flag(unscanned_moderation_details)
             except TypeError as e:
                 print(str(e) + " - trying one at a time")
                 self.add_embeddings_single(index, model, rows)
@@ -336,6 +363,7 @@ class Discover:
                 e = sys.exc_info()[0]
                 print("Unknown Error: " + str(e) + " - trying one at a time")
                 self.add_embeddings_single(index, model, rows)
+        self.insert_moderation_flag(unscanned_moderation_details)
 
     def add_embeddings_single(self, index, model, rows):
         next_faiss_id = index.ntotal

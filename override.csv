@@ -1,0 +1,3 @@
+﻿sha256,human_override_moderation_flag,human_override_reason
+examplesha123,SAFE_MANUAL,false positive. image is fine
+7464253dc90970f5713716cf726ebc73284f6f5c512ed8a1d5507d150ee1e421,BLOCKED_MANUAL,do not display under any circumstance
