@@ -18,11 +18,11 @@ class Overrider:
                              port=db_config.port,
                              database=db_config.database,
                              pool_name="overrider_pool",
-                             pool_size=1)
+                             pool_size=5)
         return conn
 
     def get_connection(self):
-        connection = mysql.connect(pool_name="discover_pool")
+        connection = mysql.connect(pool_name="overrider_pool")
         return connection
 
     def get_cursor(self, connection):
