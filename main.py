@@ -16,6 +16,7 @@ import simplejson
 import time
 import waitress
 import logging
+import numpy as np
 
 
 class ImageEmbeddingContainer:
@@ -152,36 +153,85 @@ class Discover:
         except:
             print("unknown error")
 
+    def get_last_valid_faiss_id(self):
+        connection = self.get_connection()
+        cursor = self.get_cursor(connection)
+        cursor.execute('select min(previous) from (select faiss_id, Lag(faiss_id,1) over (order BY faiss_id) as previous from faiss) a where faiss_id != previous+1')
+        row = cursor.fetchone()
+        cursor.close()
+        connection.close()
+        last_valid_id_in_db = row[0]
+        return last_valid_id_in_db
+
+    def get_faiss_db_length(self):
+        connection = self.get_connection()
+        cursor = self.get_cursor(connection)
+        cursor.execute('select count(*) from faiss')
+        row = cursor.fetchone()
+        cursor.close()
+        connection.close()
+        if row is None or row[0] is None:
+            db_length = 0
+        else:
+            db_length = row[0]
+        return db_length
+
+    def get_last_faiss_id_in_db(self):
+        connection = self.get_connection()
+        cursor = self.get_cursor(connection)
+        cursor.execute('select max(faiss_id) from faiss')
+        row = cursor.fetchone()
+        cursor.close()
+        connection.close()
+        if row is None or row[0] is None:
+            last_faiss_id_in_db = -1
+        else:
+            last_faiss_id_in_db = row[0]
+        return last_faiss_id_in_db
+
+    def delete_from_faiss_db(self, last_valid_id):
+        connection = self.get_connection()
+        cursor = self.get_cursor(connection)
+        cursor.execute('Delete from faiss where faiss_id>%s', (last_valid_id,))
+        connection.commit()
+        cursor.close()
+        connection.close()
+        print("Deleted extra faiss ids from db past: " + str(last_valid_id))
+
     def reconcile_index_with_db(self, index):
         print("Reconciling index & db..")
         try:
-            connection = self.get_connection()
-            cursor = self.get_cursor(connection)
-            cursor.execute('select max(faiss_id) from faiss')
-            row = cursor.fetchone()
-            cursor.close()
-            connection.close()
-            if row is None or row[0] is None:
-                last_faiss_id_in_db = -1
-            else:
-                last_faiss_id_in_db = row[0]
+            ##1. check max
+            last_faiss_id_in_db = self.get_last_faiss_id_in_db()
             last_faiss_id_in_idx = index.ntotal-1
             print("last_faiss_id_in_db: " + str(last_faiss_id_in_db) + " last_faiss_id_in_idx: " + str(last_faiss_id_in_idx))
-            if last_faiss_id_in_db > last_faiss_id_in_idx:
-                connection = self.get_connection()
-                cursor = self.get_cursor(connection)
-                cursor.execute('Delete from faiss where faiss_id>%s', (last_faiss_id_in_idx,))
-                connection.commit()
-                cursor.close()
-                connection.close()
-                print("Deleted extra faiss ids from db")
-            elif last_faiss_id_in_db < last_faiss_id_in_idx:
-                #index.remove([i for i in range(last_faiss_id_in_db+1, last_faiss_id_in_idx)])
-                print("Can't delete extra faiss entries from index, continuing as is. Consider reindexing")
-            else:
-                print("No reconciliation required")
 
-            return min(last_faiss_id_in_db, last_faiss_id_in_idx)
+            if last_faiss_id_in_db > last_faiss_id_in_idx:
+                self.delete_from_faiss_db(last_faiss_id_in_idx)
+            elif last_faiss_id_in_db < last_faiss_id_in_idx:
+                index.remove_ids(np.array([i for i in range(last_faiss_id_in_db+1, index.ntotal)]))
+                print("Deleted extra entries from faiss")
+            else:
+                print("Max ids are the same.. now checking length is the same")
+
+            ##2. check length
+            db_length = self.get_faiss_db_length()
+            print("DB length: " + str(db_length) + " Faiss length: " + str(index.ntotal))
+            if db_length < index.ntotal:
+                last_valid_id_in_db = self.get_last_valid_faiss_id()
+                print("DB has gaps in index, deleting ids past first gap: " + str(last_valid_id_in_db))
+                self.delete_from_faiss_db(last_valid_id_in_db)
+                index.remove_ids(np.array([i for i in range(last_valid_id_in_db + 1, index.ntotal)]))
+            elif db_length > index.ntotal:
+                print("DB length longer than index length - doesn't make sense, need full reindexing")
+            else:
+                print("Length is same, db matches index")
+
+            db_length = self.get_faiss_db_length()
+            last_faiss_id_in_db = self.get_last_faiss_id_in_db()
+            print("DB length: " + str(db_length) + " Faiss length: " + str(index.ntotal))
+            print("DB last id: " + str(last_faiss_id_in_db) + " Faiss last id: " + str(index.ntotal-1))
+            return index.ntotal-1
         except Error as e:
             print("Error while reconciling faiss_ids", e)
 
