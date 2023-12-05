@@ -280,8 +280,11 @@ class Discover:
             connection = self.get_connection()
             cursor = self.get_cursor(connection)
             formatted_ids = ", ".join([str(v) for v in faiss_ids])
-            query = """with a as (select o.*, f.faiss_id from faiss f left join ordinals o on f.sha256=o.sha256 where f.faiss_id in ({li}))
-                       select * from a where sequence_number in (select min(sequence_number) from a group by sha256) order by FIELD(faiss_id, {li})"""
+            query = """with a as (select o.*, f.faiss_id from faiss f left join ordinals o on f.sha256=o.sha256 where f.faiss_id in ({li})),
+                       b as (select min(sequence_number) as sequence_number from a group by sha256)
+                       select a.* from a, b where o.sequence_number in (b.sequence_number) order by FIELD(faiss_id, {li})"""
+            # query = """with a as (select o.*, f.faiss_id from faiss f left join ordinals o on f.sha256=o.sha256 where f.faiss_id in ({li})),
+            #            select * from a where sequence_number in (select min(sequence_number) from a group by sha256) order by FIELD(faiss_id, {li})"""
             cursor.execute(query.format(li=formatted_ids))
             rows = cursor.fetchall()
             cursor.close()
@@ -289,6 +292,21 @@ class Discover:
             return rows
         except Error as e:
             print("Error while retrieving numbers by faiss_id", e)
+
+    def get_numbers_by_dbclass(self, dbclass, n):
+        try:
+            connection = self.get_connection()
+            cursor = self.get_cursor(connection)
+            query = """with a as (select sha256 from dbscan where dbscan_class = %s limit %s), 
+                       b as (select min(sequence_number) as sequence_number from ordinals o, a where o.sha256 in (a.sha256) group by o.sha256)
+                       select o.* from ordinals o, b where o.sequence_number in (b.sequence_number)"""
+            cursor.execute(query, (dbclass, n))
+            rows = cursor.fetchall()
+            cursor.close()
+            connection.close()
+            return rows
+        except Error as e:
+            print("Error while retrieving numbers by dbclass", e)
 
     def get_content_from_sha(self, sha256):
         try:
@@ -523,6 +541,13 @@ class Discover:
         print("db: " + str(t2-t1) + ". index: " + str(t1-t0))
         return zipped
 
+    def get_dbclass_to_inscription_numbers(self, dbclass, n):
+        t0 = time.time()
+        rows = self.get_numbers_by_dbclass(dbclass, n)
+        t1 = time.time()
+        print("db: " + str(t1 - t0))
+        return rows
+
     def get_similar_images(self, model, index, sha256, n=5):
         t0 = time.time()
         rows = self.get_content_from_sha(sha256)
@@ -576,6 +601,27 @@ FullSearchResult = collections.namedtuple("FullSearchResult",
                                            "is_recursive",
                                            "faiss_id",
                                            "distance"])
+ClassResult = collections.namedtuple("ClassResult",
+                                          ["id",
+                                           "content_length",
+                                           "content_type",
+                                           "genesis_fee",
+                                           "genesis_height",
+                                           "genesis_transaction",
+                                           "pointer",
+                                           "number",
+                                           "sequence_number",
+                                           "parent",
+                                           "metaprotocol",
+                                           "embedded_metadata",
+                                           "sat",
+                                           "timestamp",
+                                           "sha256",
+                                           "text",
+                                           "is_json",
+                                           "is_maybe_json",
+                                           "is_bitmap_style",
+                                           "is_recursive"])
 
 
 print("Creating app")
@@ -637,6 +683,17 @@ def similar(sha256):
 def ntotal():
     return str(index.ntotal)
 
+@app.route("/get_class/<dbclass>")
+def get_class(dbclass):
+    n = request.args.get('n', default=100, type=int)
+    rows = discover.get_dbclass_to_inscription_numbers(dbclass, n)
+    named_tuple = [ClassResult(*tuple_) for tuple_ in rows]
+    response = app.response_class(
+        response=simplejson.dumps(named_tuple),
+        status=200,
+        mimetype='application/json'
+    )
+    return response
 
 if __name__ == '__main__':
     print("main hit")
