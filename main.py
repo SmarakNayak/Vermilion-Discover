@@ -282,7 +282,7 @@ class Discover:
             formatted_ids = ", ".join([str(v) for v in faiss_ids])
             query = """with a as (select o.*, f.faiss_id from faiss f left join ordinals o on f.sha256=o.sha256 where f.faiss_id in ({li})),
                        b as (select min(sequence_number) as sequence_number from a group by sha256)
-                       select a.* from a, b where o.sequence_number in (b.sequence_number) order by FIELD(faiss_id, {li})"""
+                       select a.* from a, b where a.sequence_number in (b.sequence_number) order by FIELD(faiss_id, {li})"""
             # query = """with a as (select o.*, f.faiss_id from faiss f left join ordinals o on f.sha256=o.sha256 where f.faiss_id in ({li})),
             #            select * from a where sequence_number in (select min(sequence_number) from a group by sha256) order by FIELD(faiss_id, {li})"""
             cursor.execute(query.format(li=formatted_ids))
@@ -644,7 +644,7 @@ async def hello_world():
 @app.route("/search/<search_term>")
 def search(search_term):
     n = request.args.get('n', default=9, type=int)
-    rows = discover.get_text_to_inscription_numbers(model, index, search_term, min(n, 100))
+    rows = discover.get_text_to_inscription_numbers(model, index, search_term, min(n, 50))
     named_tuple = [FullSearchResult(*tuple_) for tuple_ in rows]
     response = app.response_class(
         response=simplejson.dumps(named_tuple),
@@ -658,7 +658,7 @@ def search(search_term):
 def search_by_image():
     image_binary = request.get_data()
     n = request.args.get('n', default=9, type=int)
-    rows = discover.get_image_to_inscription_numbers(model, index, image_binary, min(n, 100))
+    rows = discover.get_image_to_inscription_numbers(model, index, image_binary, min(n, 50))
     named_tuple = [FullSearchResult(*tuple_) for tuple_ in rows]
     response = app.response_class(
         response=simplejson.dumps(named_tuple),
