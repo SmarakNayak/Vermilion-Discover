@@ -240,7 +240,7 @@ class Discover:
         try:
             connection = self.get_connection()
             cursor = self.get_cursor(connection)
-            cursor.execute('select max(content_id) from content where sha256 in (select sha256 from faiss)')
+            cursor.execute('select max(content_id) from content where sha256 in (select sha256 from faiss where faiss_id in (select max(faiss_id) from faiss))')
             row = cursor.fetchone()
             cursor.close()
             connection.close()
@@ -326,10 +326,12 @@ class Discover:
         try:
             self.index = faiss.read_index("ivf_index.bin")
         except RuntimeError as e:
-            ## initialize as flat index. On next retrain it will be converted into an IVF
-            print("Couldn't find index, creating new one.", e)
-            self.index = faiss.IndexFlatIP(d)
-
+            if "No such file or directory" in str(e):
+                ## initialize as flat index. On next retrain it will be converted into an IVF
+                print("Couldn't find index, creating new one.", e)
+                self.index = faiss.IndexFlatIP(d)
+            else:
+                raise
         return self.index
 
     def nsfw_filter(self, model, embedding_container):
@@ -473,6 +475,7 @@ class Discover:
                     e = sys.exc_info()[0]
                     print("Unknown Error: " + str(e) + " for sha256: " + sha256 + ". Skipping")
                     self.insert_moderation_flag([(content_id, sha256, "UNKNOWN_AUTOMATED", "", 0)])
+                    raise
                     continue
             else:
                 self.insert_moderation_flag([(content_id, sha256, "SAFE_AUTOMATED", "", 0)])
@@ -487,12 +490,14 @@ class Discover:
         last_retrain_id = last_content_id
         while True:
             time.sleep(1) #Helps with debugging for some reason
+            t0 = time.perf_counter()
             if self.stop_indexer:
                 print("Exiting indexer")
                 break
             start_content_id = last_content_id + 1
             print(start_content_id)
             rows = self.get_image_list(start_content_id)
+            t1 = time.perf_counter()
             if rows is None:
                 print("Trying again in 60s")
                 time.sleep(60)
@@ -502,7 +507,10 @@ class Discover:
                 time.sleep(60)
                 continue
             self.add_embeddings(model, rows)
+            t2 = time.perf_counter()
             self.write_index()
+            t3 = time.perf_counter()
+            print("write index: " + str(t3 - t2) + ". add: " + str(t2 - t1) + ". get images: " + str(t1 - t0))
             last_content_id = rows[-1][0]
             if last_content_id > last_retrain_id + 10000:
                 self.retrain_index()
@@ -524,6 +532,7 @@ class Discover:
         new_index.train(embeddings)
         print("Adding")
         new_index.add(embeddings)
+        new_index.nprobe=10
         print("Finished")
         self.index = new_index
 
@@ -724,7 +733,7 @@ def get_class(dbclass):
 
 if __name__ == '__main__':
     print("main hit")
-    index_thread = threading.Thread(target=discover.update_index, args=(model))
+    index_thread = threading.Thread(target=discover.update_index, args=(model,))
     index_thread.start()
     logger = logging.getLogger('waitress')
     logger.setLevel(logging.INFO)
