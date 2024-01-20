@@ -255,7 +255,7 @@ class Discover:
         try:
             connection = self.get_connection()
             cursor = self.get_cursor(connection)
-            cursor.execute('select content_id, sha256, content, content_type from content where content_id >= %s order by content_id limit 0, 100',(start_number,))
+            cursor.execute('select content_id, sha256, content, content_type from content where content_id >= %s order by content_id limit 0, 10000',(start_number,))
             rows = cursor.fetchall()
             cursor.close()
             connection.close()
@@ -512,7 +512,7 @@ class Discover:
             t3 = time.perf_counter()
             print("write index: " + str(t3 - t2) + ". add: " + str(t2 - t1) + ". get images: " + str(t1 - t0))
             last_content_id = rows[-1][0]
-            if last_content_id > last_retrain_id + 10000:
+            if last_content_id > last_retrain_id + 100000:
                 self.retrain_index()
                 self.write_index()
                 last_retrain_id = last_content_id
