@@ -527,7 +527,7 @@ class Discover:
             t3 = time.perf_counter()
             print("write index: " + str(t3 - t2) + ". add: " + str(t2 - t1) + ". get images: " + str(t1 - t0))
             last_content_id = rows[-1][0]
-            if last_content_id > last_retrain_id + 10000:
+            if last_content_id > last_retrain_id + 100000:
                 self.retrain_index()
                 self.write_index()
                 last_retrain_id = last_content_id
