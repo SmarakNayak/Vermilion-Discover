@@ -431,6 +431,9 @@ class Discover:
             except KeyError as e:
                 print(str(e) + " - trying one at a time")
                 self.add_embeddings_single(model, rows)
+            except SyntaxError as e:
+                print(str(e) + " - trying one at a time")
+                self.add_embeddings_single(model, rows)
             except:
                 e = sys.exc_info()[0]
                 print("Unknown Error: " + str(e) + " - trying one at a time")
@@ -477,6 +480,10 @@ class Discover:
                     continue
                 except KeyError as e:
                     print("KeyError: " + str(e) + " for sha256: " + sha256 + ". Skipping")
+                    self.insert_moderation_flag([(content_id, sha256, "UNKNOWN_AUTOMATED", "", 0)])
+                    continue
+                except SyntaxError as e:
+                    print("SyntaxError: " + str(e) + " for sha256: " + sha256 + ". Skipping")
                     self.insert_moderation_flag([(content_id, sha256, "UNKNOWN_AUTOMATED", "", 0)])
                     continue
                 except:
