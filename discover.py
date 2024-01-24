@@ -507,7 +507,9 @@ class Discover:
             time.sleep(1) #Helps with debugging for some reason
             t0 = time.perf_counter()
             if self.stop_indexer:
-                print("Exiting indexer")
+                print("Exiting indexer, writing index")
+                self.write_index()
+                print("Index written to drive")
                 break
             start_content_id = last_content_id + 1
             print(start_content_id)
@@ -523,14 +525,16 @@ class Discover:
                 continue
             self.add_embeddings(model, rows)
             t2 = time.perf_counter()
-            self.write_index()
-            t3 = time.perf_counter()
-            print("write index: " + str(t3 - t2) + ". add: " + str(t2 - t1) + ". get images: " + str(t1 - t0))
+            print("add: " + str(t2 - t1) + ". get images: " + str(t1 - t0))
             last_content_id = rows[-1][0]
             if last_content_id > last_retrain_id + 100000:
+                t1 = time.perf_counter()
                 self.retrain_index()
+                t2 = time.perf_counter()
                 self.write_index()
+                t3 = time.perf_counter()
                 last_retrain_id = last_content_id
+                print("write index: " + str(t3 - t2) + ". " + ". retrain index: " + str(t2 - t1))
         print("Indexer exited")
 
     def retrain_index(self):
