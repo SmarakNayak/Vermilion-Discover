@@ -100,8 +100,8 @@ config_path = os.getenv("DISCOVER_CONFIG_PATH")
 if config_path is None:
     config_path = "ord.yaml"
 cluster = Cluster()
-model = SentenceTransformer('clip-ViT-B-32')
-index = cluster.get_index(512)
+model = SentenceTransformer('clip-ViT-L-14')
+index = cluster.get_index(768)
 conn = cluster.initialize_db_pool(config_path)
 cluster.create_dbscan_table()
 print("db initialized")

@@ -63,8 +63,8 @@ config_path = os.getenv("DISCOVER_CONFIG_PATH")
 if config_path is None:
     config_path = "ord.yaml"
 discover = Discover()
-model = SentenceTransformer('clip-ViT-B-32')
-index = discover.get_index(512)
+model = SentenceTransformer('clip-ViT-L-14')
+index = discover.get_index(768)
 conn = discover.initialize_db_pool(config_path)
 discover.create_faiss_mapping_table()
 discover.create_content_moderation_table()

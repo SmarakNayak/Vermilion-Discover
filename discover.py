@@ -544,7 +544,7 @@ class Discover:
             self.index.make_direct_map()
         embeddings = self.index.reconstruct_n(0, length)
         nlist = 128
-        d = 512
+        d = 768
         quantizer = faiss.IndexFlatIP(d)
         new_index = faiss.IndexIVFFlat(quantizer, d, nlist, faiss.METRIC_INNER_PRODUCT)
         print("Training")
