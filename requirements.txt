@@ -9,3 +9,4 @@ simplejson
 waitress
 torch
 scikit-learn
+asyncpg
