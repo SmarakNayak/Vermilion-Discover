@@ -24,6 +24,12 @@ class Discover:
     index = None
     pool = None
 
+    # 0. Initialize
+    async def setup_db(self, config_path):
+        await self.initialize_db_pool(config_path)
+        await self.create_faiss_mapping_table()
+        await self.create_content_moderation_table()
+
     # 1. DB functions
     async def initialize_db_pool(self, config_path):
         config = yaml.safe_load(open(config_path))
