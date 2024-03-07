@@ -8,7 +8,7 @@ import collections
 import simplejson
 import waitress
 import logging
-from discover import Discover
+from postgres import Discover
 
 # Return types
 SearchResult = collections.namedtuple("SearchResult",["sha256", "faiss_id", "distance"])
@@ -71,7 +71,7 @@ if config_path is None:
 discover = Discover()
 model = SentenceTransformer('clip-ViT-L-14')
 index = discover.get_index(768)
-conn = discover.initialize_db_pool(config_path)
+pool = discover.initialize_db_pool(config_path)
 discover.create_faiss_mapping_table()
 discover.create_content_moderation_table()
 app = Flask(__name__)
