@@ -182,7 +182,7 @@ class Discover:
     async def get_image_list(self, start_number):
         try:
             async with self.pool.acquire() as conn:
-                rows = await conn.fetch('select content_id, sha256, content, content_type from content where content_id >= $1 order by content_id limit 0, 1000',(start_number,))
+                rows = await conn.fetch('select content_id, sha256, content, content_type from content where content_id >= $1 order by content_id limit 1000',(start_number,))
                 return rows
         except Exception as e:
             print("Error while retrieving image list", e)
