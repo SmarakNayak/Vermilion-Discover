@@ -42,9 +42,7 @@ class Discover:
             async with self.pool.acquire() as conn:
                 await conn.execute("""CREATE TABLE IF NOT EXISTS faiss (
                 sha256 varchar(80) not null primary key,
-                faiss_id int not null,
-                INDEX index_id (faiss_id),
-                INDEX sha256 (sha256)
+                faiss_id int not null
                 )""")
                 await conn.execute("CREATE INDEX IF NOT EXISTS index_faiss_id ON faiss (faiss_id)")
                 await conn.execute("CREATE INDEX IF NOT EXISTS index_faiss_sha256 ON faiss (sha256)")
@@ -59,7 +57,7 @@ class Discover:
                 sha256 varchar(80) not null primary key,
                 automated_moderation_flag varchar(40),
                 flagged_concept varchar(40),
-                cosine_distance double,
+                cosine_distance double precision,
                 human_override_moderation_flag varchar(40),
                 human_override_reason varchar(80)
                 )""")

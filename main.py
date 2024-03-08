@@ -138,6 +138,8 @@ async def get_class(dbclass):
 
 if __name__ == '__main__':
     print("main hit")
+    asyncio.run(discover.update_index(model))
+    print("thread hit")
     index_thread = threading.Thread(target=asyncio.run, args=(discover.update_index(model),))
     index_thread.start()
     logger = logging.getLogger('waitress')
