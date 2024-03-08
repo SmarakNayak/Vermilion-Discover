@@ -489,6 +489,8 @@ class Discover:
         D, I = self.index.search(query_emb, n)
         t2 = time.time()
         rows = await self.get_numbers_by_faiss_id(I[0])
+        print("rows found:")
+        print(rows)
         zipped = list(map(lambda x, y: (x + (float(y),)), rows, D[0]))
         t3 = time.time()
         print("db: " + str(t3-t2) + ". index: " + str(t2-t1) + ". encode: " + str(t1-t0))
