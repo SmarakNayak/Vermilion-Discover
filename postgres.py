@@ -171,7 +171,7 @@ class Discover:
     async def get_last_insert_content_id(self):
         try:
             async with self.pool.acquire() as conn:
-                row = await conn.fetch('select max(content_id) from content where sha256 in (select sha256 from faiss where faiss_id in (select max(faiss_id) from faiss))')
+                row = await conn.fetchrow('select max(content_id) from content where sha256 in (select sha256 from faiss where faiss_id in (select max(faiss_id) from faiss))')
             if row is None or row[0] is None:
                 return -1
             else:
