@@ -126,7 +126,7 @@ class Discover:
     async def delete_from_faiss_db(self, last_valid_id):
         try:
             async with self.pool.acquire() as conn:
-                await conn.execute('Delete from faiss where faiss_id>$1', (last_valid_id,))
+                await conn.execute('Delete from faiss where faiss_id>$1', last_valid_id)
                 print("Deleted extra faiss ids from db past: " + str(last_valid_id))
         except Exception as e:
             print(f"Unexpected error: {e}")
@@ -182,7 +182,7 @@ class Discover:
     async def get_image_list(self, start_number):
         try:
             async with self.pool.acquire() as conn:
-                rows = await conn.fetch('select content_id, sha256, content, content_type from content where content_id >= $1 order by content_id limit 1000',(start_number,))
+                rows = await conn.fetch('select content_id, sha256, content, content_type from content where content_id >= $1 order by content_id limit 1000', start_number)
                 return rows
         except Exception as e:
             print("Error while retrieving image list", e)
