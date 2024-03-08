@@ -413,7 +413,7 @@ class Discover:
     async def update_index(self, model):
         print("Indexer starting in background..")
         await self.reconcile_index_with_db()
-        last_content_id = self.get_last_insert_content_id()
+        last_content_id = await self.get_last_insert_content_id()
         last_retrain_id = last_content_id
         while True:
             time.sleep(1) #Helps with debugging for some reason
