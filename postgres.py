@@ -46,6 +46,8 @@ class Discover:
                 INDEX index_id (faiss_id),
                 INDEX sha256 (sha256)
                 )""")
+                await conn.execute("CREATE INDEX IF NOT EXISTS index_faiss_id ON faiss (faiss_id)")
+                await conn.execute("CREATE INDEX IF NOT EXISTS index_faiss_sha256 ON faiss (sha256)")
         except Exception as e:
             print(f"Unexpected error: {e}")
 
@@ -53,15 +55,15 @@ class Discover:
         try:
             async with self.pool.acquire() as conn:
                 await conn.execute("""CREATE TABLE IF NOT EXISTS content_moderation (            
-                content_id int unsigned,
+                content_id int,
                 sha256 varchar(80) not null primary key,
                 automated_moderation_flag varchar(40),
                 flagged_concept varchar(40),
                 cosine_distance double,
                 human_override_moderation_flag varchar(40),
-                human_override_reason varchar(80),
-                INDEX sha256 (sha256)
+                human_override_reason varchar(80)
                 )""")
+                await conn.execute("CREATE INDEX IF NOT EXISTS index_content_moderation_sha256 ON content_moderation (sha256)")
         except Exception as e:
             print(f"Unexpected error: {e}")
 
