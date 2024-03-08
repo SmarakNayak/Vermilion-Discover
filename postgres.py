@@ -203,7 +203,7 @@ class Discover:
                 query = """with a as (select o.*, f.faiss_id from faiss f left join ordinals o on f.sha256=o.sha256 where f.faiss_id in ({li})),
                            b as (select min(sequence_number) as sequence_number from a group by sha256)
                            select a.* from a, b where a.sequence_number in (b.sequence_number) order by FIELD(faiss_id, {li})"""
-                print(query)
+                print(query.format(li=formatted_ids))
                 rows = await conn.fetch(query.format(li=formatted_ids))
                 return rows
         except Exception as e:
