@@ -83,9 +83,9 @@ async def hello_world():
 
 
 @app.route("/search/<search_term>")
-def search(search_term):
+async def search(search_term):
     n = request.args.get('n', default=9, type=int)
-    rows = discover.get_text_to_inscription_numbers(model, search_term, min(n, 50))
+    rows = await discover.get_text_to_inscription_numbers(model, search_term, min(n, 50))
     named_tuple = [FullSearchResult(*tuple_) for tuple_ in rows]
     response = app.response_class(
         response=simplejson.dumps(named_tuple),
@@ -96,10 +96,10 @@ def search(search_term):
 
 
 @app.route("/search_by_image", methods=['POST'])
-def search_by_image():
+async def search_by_image():
     image_binary = request.get_data()
     n = request.args.get('n', default=9, type=int)
-    rows = discover.get_image_to_inscription_numbers(model, image_binary, min(n, 50))
+    rows = await discover.get_image_to_inscription_numbers(model, image_binary, min(n, 50))
     named_tuple = [FullSearchResult(*tuple_) for tuple_ in rows]
     response = app.response_class(
         response=simplejson.dumps(named_tuple),
@@ -109,9 +109,9 @@ def search_by_image():
     return response
 
 @app.route("/similar/<sha256>")
-def similar(sha256):
+async def similar(sha256):
     n = request.args.get('n', default=9, type=int)
-    rows = discover.get_similar_images(model, sha256, min(n, 50))
+    rows = await discover.get_similar_images(model, sha256, min(n, 50))
     named_tuple = [FullSearchResult(*tuple_) for tuple_ in rows]
     response = app.response_class(
         response=simplejson.dumps(named_tuple),
@@ -125,9 +125,9 @@ def ntotal():
     return str(discover.index.ntotal)
 
 @app.route("/get_class/<dbclass>")
-def get_class(dbclass):
+async def get_class(dbclass):
     n = request.args.get('n', default=100, type=int)
-    rows = discover.get_dbclass_to_inscription_numbers(dbclass, n)
+    rows = await discover.get_dbclass_to_inscription_numbers(dbclass, n)
     named_tuple = [ClassResult(*tuple_) for tuple_ in rows]
     response = app.response_class(
         response=simplejson.dumps(named_tuple),

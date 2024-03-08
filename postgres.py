@@ -131,16 +131,16 @@ class Discover:
         except Exception as e:
             print(f"Unexpected error: {e}")
 
-    def reconcile_index_with_db(self):
+    async def reconcile_index_with_db(self):
         print("Reconciling index & db..")
         try:
             ##1. check max
-            last_faiss_id_in_db = self.get_last_faiss_id_in_db()
+            last_faiss_id_in_db = await self.get_last_faiss_id_in_db()
             last_faiss_id_in_idx = self.index.ntotal-1
             print("last_faiss_id_in_db: " + str(last_faiss_id_in_db) + " last_faiss_id_in_idx: " + str(last_faiss_id_in_idx))
 
             if last_faiss_id_in_db > last_faiss_id_in_idx:
-                self.delete_from_faiss_db(last_faiss_id_in_idx)
+                await self.delete_from_faiss_db(last_faiss_id_in_idx)
             elif last_faiss_id_in_db < last_faiss_id_in_idx:
                 self.index.remove_ids(np.array([i for i in range(last_faiss_id_in_db+1, self.index.ntotal)]))
                 print("Deleted extra entries from faiss")
@@ -148,20 +148,20 @@ class Discover:
                 print("Max ids are the same.. now checking length is the same")
 
             ##2. check length
-            db_length = self.get_faiss_db_length()
+            db_length = await self.get_faiss_db_length()
             print("DB length: " + str(db_length) + " Faiss length: " + str(self.index.ntotal))
             if db_length < self.index.ntotal:
-                last_valid_id_in_db = self.get_last_valid_faiss_id()
+                last_valid_id_in_db = await self.get_last_valid_faiss_id()
                 print("DB has gaps in index, deleting ids past first gap: " + str(last_valid_id_in_db))
-                self.delete_from_faiss_db(last_valid_id_in_db)
+                await self.delete_from_faiss_db(last_valid_id_in_db)
                 self.index.remove_ids(np.array([i for i in range(last_valid_id_in_db + 1, self.index.ntotal)]))
             elif db_length > self.index.ntotal:
                 print("DB length longer than index length - doesn't make sense, need full reindexing")
             else:
                 print("Length is same, db matches index")
 
-            db_length = self.get_faiss_db_length()
-            last_faiss_id_in_db = self.get_last_faiss_id_in_db()
+            db_length = await self.get_faiss_db_length()
+            last_faiss_id_in_db = await self.get_last_faiss_id_in_db()
             print("DB length: " + str(db_length) + " Faiss length: " + str(self.index.ntotal))
             print("DB last id: " + str(last_faiss_id_in_db) + " Faiss last id: " + str(self.index.ntotal-1))
             return self.index.ntotal-1
@@ -240,7 +240,7 @@ class Discover:
                 raise
         return self.index
 
-    def nsfw_filter(self, model, embedding_container):
+    async def nsfw_filter(self, model, embedding_container):
         # List of standard NSFW concepts to filter out
         concepts = ['sexual', 'nude', 'sex', '18+', 'naked', 'nsfw', 'porn', 'explicit content', 'uncensored', 'gore']
         # List of special concepts, focusing on protecting images of minors
@@ -280,7 +280,7 @@ class Discover:
                                         max_concepts[i],
                                         float(max_score[i])))
 
-        self.insert_moderation_flag(moderation_list)
+        await self.insert_moderation_flag(moderation_list)
 
         # only pass clean images
         filtered_embeddings = embedding_container.image_embeddings[clean_index]
@@ -288,7 +288,7 @@ class Discover:
         filtered_container = ImageEmbeddingContainer(filtered_embeddings, filtered_content_id_sha_list)
         return filtered_container
 
-    def add_embeddings(self, model, rows):
+    async def add_embeddings(self, model, rows):
         image_list = []
         id_list = []
         content_id_list = []
@@ -321,38 +321,38 @@ class Discover:
             try:
                 img_emb = model.encode(image_list)
                 embeddings_container = ImageEmbeddingContainer(img_emb, content_id_list)
-                filtered_container = self.nsfw_filter(model, embeddings_container)
+                filtered_container = await self.nsfw_filter(model, embeddings_container)
                 if len(filtered_container.image_embeddings) > 0:
                     self.index.add(filtered_container.image_embeddings)
                     for content_id_sha in filtered_container.content_id_sha_list:
                         id_list.append((content_id_sha[1], next_faiss_id))
                         next_faiss_id += 1
-                    self.insert_faiss_mapping(id_list)
+                    await self.insert_faiss_mapping(id_list)
             except TypeError as e:
                 print(str(e) + " - trying one at a time")
-                self.add_embeddings_single(model, rows)
+                await self.add_embeddings_single(model, rows)
             except ValueError as e:
                 print(str(e) + " - trying one at a time")
-                self.add_embeddings_single(model, rows)
+                await self.add_embeddings_single(model, rows)
             except OSError as e:
                 print(str(e) + " - trying one at a time")
-                self.add_embeddings_single(model, rows)
+                await self.add_embeddings_single(model, rows)
             except Image.DecompressionBombError as e:
                 print(str(e) + " - trying one at a time")
-                self.add_embeddings_single(model, rows)
+                await self.add_embeddings_single(model, rows)
             except KeyError as e:
                 print(str(e) + " - trying one at a time")
-                self.add_embeddings_single(model, rows)
+                await self.add_embeddings_single(model, rows)
             except SyntaxError as e:
                 print(str(e) + " - trying one at a time")
-                self.add_embeddings_single(model, rows)
+                await self.add_embeddings_single(model, rows)
             except:
                 e = sys.exc_info()[0]
                 print("Unknown Error: " + str(e) + " - trying one at a time")
-                self.add_embeddings_single(model, rows)
-        self.insert_moderation_flag(unscanned_moderation_details)
+                await self.add_embeddings_single(model, rows)
+        await self.insert_moderation_flag(unscanned_moderation_details)
 
-    def add_embeddings_single(self, model, rows):
+    async def add_embeddings_single(self, model, rows):
         next_faiss_id = self.index.ntotal
         for row in rows:
             content_id = row[0]
@@ -365,54 +365,54 @@ class Discover:
                 try:
                     img_emb = model.encode([Image.open(image_stream)])
                     embeddings_container = ImageEmbeddingContainer(img_emb, [(content_id, sha256)])
-                    filtered_container = self.nsfw_filter(model, embeddings_container)
+                    filtered_container = await self.nsfw_filter(model, embeddings_container)
                     if len(filtered_container.image_embeddings) > 0:
                         self.index.add(filtered_container.image_embeddings)
-                        self.insert_faiss_mapping([(sha256, faiss_id)])
+                        await self.insert_faiss_mapping([(sha256, faiss_id)])
                         next_faiss_id += 1
                 except UnidentifiedImageError as e:
                     print("Couldn't open sha256: " + sha256 + ". Not a valid image")
-                    self.insert_moderation_flag([(content_id, sha256, "UNKNOWN_AUTOMATED", "", 0)])
+                    await self.insert_moderation_flag([(content_id, sha256, "UNKNOWN_AUTOMATED", "", 0)])
                     continue
                 except TypeError as e:
                     print("TypeError: " + str(e) + " for sha256: " + sha256 + ". Skipping")
-                    self.insert_moderation_flag([(content_id, sha256, "UNKNOWN_AUTOMATED", "", 0)])
+                    await self.insert_moderation_flag([(content_id, sha256, "UNKNOWN_AUTOMATED", "", 0)])
                     continue
                 except ValueError as e:
                     print("ValueError: " + str(e) + " for sha256: " + sha256 + ". Skipping")
-                    self.insert_moderation_flag([(content_id, sha256, "UNKNOWN_AUTOMATED", "", 0)])
+                    await self.insert_moderation_flag([(content_id, sha256, "UNKNOWN_AUTOMATED", "", 0)])
                     continue
                 except OSError as e:
                     print("OSError: " + str(e) + " for sha256: " + sha256 + ". Skipping")
-                    self.insert_moderation_flag([(content_id, sha256, "UNKNOWN_AUTOMATED", "", 0)])
+                    await self.insert_moderation_flag([(content_id, sha256, "UNKNOWN_AUTOMATED", "", 0)])
                     continue
                 except Image.DecompressionBombError as e:
                     print("DecompressionBombError: " + str(e) + " for sha256: " + sha256 + ". Skipping")
-                    self.insert_moderation_flag([(content_id, sha256, "UNKNOWN_AUTOMATED", "", 0)])
+                    await self.insert_moderation_flag([(content_id, sha256, "UNKNOWN_AUTOMATED", "", 0)])
                     continue
                 except KeyError as e:
                     print("KeyError: " + str(e) + " for sha256: " + sha256 + ". Skipping")
-                    self.insert_moderation_flag([(content_id, sha256, "UNKNOWN_AUTOMATED", "", 0)])
+                    await self.insert_moderation_flag([(content_id, sha256, "UNKNOWN_AUTOMATED", "", 0)])
                     continue
                 except SyntaxError as e:
                     print("SyntaxError: " + str(e) + " for sha256: " + sha256 + ". Skipping")
-                    self.insert_moderation_flag([(content_id, sha256, "UNKNOWN_AUTOMATED", "", 0)])
+                    await self.insert_moderation_flag([(content_id, sha256, "UNKNOWN_AUTOMATED", "", 0)])
                     continue
                 except:
                     e = sys.exc_info()[0]
                     print("Unknown Error: " + str(e) + " for sha256: " + sha256 + ". Skipping")
-                    self.insert_moderation_flag([(content_id, sha256, "UNKNOWN_AUTOMATED", "", 0)])
+                    await self.insert_moderation_flag([(content_id, sha256, "UNKNOWN_AUTOMATED", "", 0)])
                     raise
                     continue
             else:
-                self.insert_moderation_flag([(content_id, sha256, "SAFE_AUTOMATED", "", 0)])
+                await self.insert_moderation_flag([(content_id, sha256, "SAFE_AUTOMATED", "", 0)])
 
     def write_index(self):
         faiss.write_index(self.index, "ivf_index.bin")
 
-    def update_index(self, model):
+    async def update_index(self, model):
         print("Indexer starting in background..")
-        self.reconcile_index_with_db()
+        await self.reconcile_index_with_db()
         last_content_id = self.get_last_insert_content_id()
         last_retrain_id = last_content_id
         while True:
@@ -425,7 +425,7 @@ class Discover:
                 break
             start_content_id = last_content_id + 1
             print(start_content_id)
-            rows = self.get_image_list(start_content_id)
+            rows = await self.get_image_list(start_content_id)
             t1 = time.perf_counter()
             if rows is None:
                 print("Trying again in 60s")
@@ -435,7 +435,7 @@ class Discover:
                 print("index up to date, sleeping for 60s")
                 time.sleep(60)
                 continue
-            self.add_embeddings(model, rows)
+            await self.add_embeddings(model, rows)
             t2 = time.perf_counter()
             print("add: " + str(t2 - t1) + ". get images: " + str(t1 - t0))
             last_content_id = rows[-1][0]
@@ -467,56 +467,56 @@ class Discover:
         print("Finished")
         self.index = new_index
 
-    def get_text_to_image_shas(self, model, search_term, n=5):
+    async def get_text_to_image_shas(self, model, search_term, n=5):
         query_emb = model.encode([search_term])
         D, I = self.index.search(query_emb, n)
-        rows = self.get_shas_by_faiss_id(I[0])
+        rows = await self.get_shas_by_faiss_id(I[0])
         zipped = list(map(lambda x, y: (x[0], x[1], float(y)), rows, D[0]))
         return zipped
 
-    def get_image_to_image_shas(self, model, image_binary, n=5):
+    async def get_image_to_image_shas(self, model, image_binary, n=5):
         image_stream = BytesIO(image_binary)
         image_emb = model.encode([Image.open(image_stream)])
         D, I = self.index.search(image_emb, n)
-        rows = self.get_shas_by_faiss_id(I[0])
+        rows = await self.get_shas_by_faiss_id(I[0])
         zipped = list(map(lambda x, y: (x[0], x[1], float(y)), rows, D[0]))
         return zipped
 
-    def get_text_to_inscription_numbers(self, model, search_term, n=5):
+    async def get_text_to_inscription_numbers(self, model, search_term, n=5):
         t0 = time.time()
         query_emb = model.encode([search_term])
         t1 = time.time()
         D, I = self.index.search(query_emb, n)
         t2 = time.time()
-        rows = self.get_numbers_by_faiss_id(I[0])
+        rows = await self.get_numbers_by_faiss_id(I[0])
         zipped = list(map(lambda x, y: (x + (float(y),)), rows, D[0]))
         t3 = time.time()
         print("db: " + str(t3-t2) + ". index: " + str(t2-t1) + ". encode: " + str(t1-t0))
         return zipped
 
-    def get_image_to_inscription_numbers(self, model, image_binary, n=5):
+    async def get_image_to_inscription_numbers(self, model, image_binary, n=5):
         t0 = time.time()
         image_stream = BytesIO(image_binary)
         image_emb = model.encode([Image.open(image_stream)])
         t1 = time.time()
         D, I = self.index.search(image_emb, n)
         t2 = time.time()
-        rows = self.get_numbers_by_faiss_id(I[0])
+        rows = await self.get_numbers_by_faiss_id(I[0])
         zipped = list(map(lambda x, y: (x + (float(y),)), rows, D[0]))
         t3 = time.time()
         print("db: " + str(t3-t2) + ". index: " + str(t2-t1) + ". encode: " + str(t1-t0))
         return zipped
 
-    def get_dbclass_to_inscription_numbers(self, dbclass, n):
+    async def get_dbclass_to_inscription_numbers(self, dbclass, n):
         t0 = time.time()
-        rows = self.get_numbers_by_dbclass(dbclass, n)
+        rows = await self.get_numbers_by_dbclass(dbclass, n)
         t1 = time.time()
         print("db: " + str(t1 - t0))
         return rows
 
-    def get_similar_images(self, model, sha256, n=5):
+    async def get_similar_images(self, model, sha256, n=5):
         t0 = time.time()
-        rows = self.get_content_from_sha(sha256)
+        rows = await self.get_content_from_sha(sha256)
         binary_content = rows[0][1]
         content_type = rows[0][2]
         if "image/" in content_type and "svg" not in content_type:
@@ -527,7 +527,7 @@ class Discover:
                 image_emb = model.encode([image])
                 D, I = self.index.search(image_emb, n)
                 t2 = time.time()
-                rows = self.get_numbers_by_faiss_id(I[0])
+                rows = await self.get_numbers_by_faiss_id(I[0])
                 zipped = list(map(lambda x, y: (x + (float(y),)), rows, D[0]))
                 t3 = time.time()
                 print("db1: " + str(t1 - t0) + ". index: " + str(t2 - t1) + ". db2: " + str(t3 - t2))
