@@ -19,5 +19,6 @@ discover = Discover()
 model = SentenceTransformer('clip-ViT-L-14')
 index = discover.get_index(768)
 
-asyncio.run(discover.setup_db(config_path))
-asyncio.run(discover.reconcile_index_with_db())
+loop = asyncio.get_event_loop()
+loop.run_until_complete(discover.setup_db(config_path))
+loop.run_until_complete(discover.reconcile_index_with_db())
