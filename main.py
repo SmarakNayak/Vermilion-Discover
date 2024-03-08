@@ -72,8 +72,8 @@ if config_path is None:
 discover = Discover()
 model = SentenceTransformer('clip-ViT-L-14')
 index = discover.get_index(768)
-
-asyncio.run(discover.setup_db(config_path))
+loop = asyncio.get_event_loop()
+loop.run_until_complete(discover.setup_db(config_path))
 
 app = Flask(__name__)
 
@@ -138,9 +138,7 @@ async def get_class(dbclass):
 
 if __name__ == '__main__':
     print("main hit")
-    asyncio.run(discover.update_index(model))
-    print("thread hit")
-    index_thread = threading.Thread(target=asyncio.run, args=(discover.update_index(model),))
+    index_thread = threading.Thread(target=loop.run_until_complete, args=(discover.update_index(model),))
     index_thread.start()
     logger = logging.getLogger('waitress')
     logger.setLevel(logging.INFO)
