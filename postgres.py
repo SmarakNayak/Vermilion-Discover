@@ -191,7 +191,7 @@ class Discover:
         try:
             async with self.pool.acquire() as conn:
                 formatted_ids = ", ".join([str(v) for v in faiss_ids])
-                rows = await conn.fetch('select sha256, faiss_id from faiss where faiss_id in ({li}) order by FIELD(faiss_id, {li})'.format(li=formatted_ids))
+                rows = await conn.fetch('select sha256, faiss_id from faiss where faiss_id in ({li}) order by array_position(array[{li}], faiss_id)'.format(li=formatted_ids))
                 return rows
         except Exception as e:
             print("Error while retrieving last_insert", e)
@@ -202,7 +202,7 @@ class Discover:
                 formatted_ids = ", ".join([str(v) for v in faiss_ids])
                 query = """with a as (select o.*, f.faiss_id from faiss f left join ordinals o on f.sha256=o.sha256 where f.faiss_id in ({li})),
                            b as (select min(sequence_number) as sequence_number from a group by sha256)
-                           select a.* from a, b where a.sequence_number in (b.sequence_number) order by FIELD(faiss_id, {li})"""
+                           select a.* from a, b where a.sequence_number in (b.sequence_number) order by array_position(array[{li}], faiss_id)"""
                 print(query.format(li=formatted_ids))
                 rows = await conn.fetch(query.format(li=formatted_ids))
                 return rows
