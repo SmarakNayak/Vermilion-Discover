@@ -10,6 +10,8 @@ import waitress
 import logging
 from postgres import Discover
 import asyncio
+from quart import Quart
+
 
 # Return types
 SearchResult = collections.namedtuple("SearchResult",["sha256", "faiss_id", "distance"])
@@ -72,10 +74,10 @@ if config_path is None:
 discover = Discover()
 model = SentenceTransformer('clip-ViT-L-14')
 index = discover.get_index(768)
-loop = asyncio.get_event_loop()
+loop = asyncio.new_event_loop()
 loop.run_until_complete(discover.setup_db(config_path))
 
-app = Flask(__name__)
+app = Quart(__name__)
 
 @app.route("/")
 async def hello_world():

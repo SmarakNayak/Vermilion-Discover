@@ -11,3 +11,4 @@ torch
 scikit-learn
 asyncpg
 asyncio
+quart
