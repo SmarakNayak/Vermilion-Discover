@@ -44,18 +44,18 @@ class Discover:
             async with self.api_pool.acquire() as conn:
                 await conn.execute("""CREATE TABLE IF NOT EXISTS faiss (
                 sha256 varchar(80) not null primary key,
-                faiss_id int not null
+                faiss_id bigint not null
                 )""")
                 await conn.execute("CREATE INDEX IF NOT EXISTS index_faiss_id ON faiss (faiss_id)")
                 await conn.execute("CREATE INDEX IF NOT EXISTS index_faiss_sha256 ON faiss (sha256)")
         except Exception as e:
-            print(f"Unexpected error: {e}")
+            print(f"Error creating Postgres table: {e}")
 
     async def create_content_moderation_table(self):
         try:
             async with self.api_pool.acquire() as conn:
                 await conn.execute("""CREATE TABLE IF NOT EXISTS content_moderation (            
-                content_id int,
+                content_id bigint,
                 sha256 varchar(80) not null primary key,
                 automated_moderation_flag varchar(40),
                 flagged_concept varchar(40),
@@ -65,7 +65,36 @@ class Discover:
                 )""")
                 await conn.execute("CREATE INDEX IF NOT EXISTS index_content_moderation_sha256 ON content_moderation (sha256)")
         except Exception as e:
-            print(f"Unexpected error: {e}")
+            print(f"Error creating Postgres table: {e}")
+
+    async def create_dbscan_table(self):
+        try:
+            async with self.api_pool.acquire() as conn:
+                await conn.execute("""CREATE TABLE IF NOT EXISTS dbscan (
+                sha256 varchar(80) not null primary key,
+                faiss_id bigint not null,
+                dbscan_class bigint not null
+                )""")
+                await conn.execute("CREATE INDEX IF NOT EXISTS index_dbscan_class ON dbscan (dbscan_class)")
+                await conn.execute("CREATE INDEX IF NOT EXISTS index_dbscan_sha256 ON dbscan (sha256)")
+        except Exception as e:
+            print("Error creating Postgres table: ", e)
+
+    async def insert_dbscan_class(self, classes):
+        try:
+            async with self.api_pool.acquire() as conn:
+                query = "INSERT INTO dbscan (sha256, faiss_id, dbscan_class) VALUES ($1, $2, $3) ON CONFLICT (sha256) DO UPDATE SET faiss_id=EXCLUDED.faiss_id, dbscan_class=EXCLUDED.dbscan_class"
+                await conn.executemany(query, classes)
+        except Exception as e:
+            print("Error inserting dbscan class", e)
+
+    async def get_shas_up_to_faiss_id(self, faiss_id):
+        try:
+            async with self.api_pool.acquire() as conn:
+                rows = await conn.fetch('select sha256, faiss_id from faiss where faiss_id < $1 order by faiss_id', faiss_id)
+            return rows
+        except Exception as e:
+            print("Error while retrieving shas", e)
 
     async def insert_faiss_mapping(self, mappings):
         try:
@@ -88,7 +117,7 @@ class Discover:
         try:
             async with self.update_pool.acquire() as conn:
                 query = """INSERT INTO content_moderation (sha256, human_override_moderation_flag, human_override_reason) VALUES ($1, $2, $3) 
-                ON DUPLICATE KEY UPDATE human_override_moderation_flag=VALUES(human_override_moderation_flag), human_override_reason=VALUES(human_override_reason)"""
+                ON CONFLICT (sha256) DO UPDATE SET human_override_moderation_flag=EXCLUDED.human_override_moderation_flag, human_override_reason=EXCLUDED.human_override_reason"""
                 await conn.executemany(query, moderation_details)
         except Exception as e:
             print(f"Unexpected error: {e}")
