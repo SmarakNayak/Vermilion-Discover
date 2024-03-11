@@ -11,3 +11,5 @@ torch
 scikit-learn
 asyncpg
 asyncio
+fastapi
+uvicorn

@@ -1,6 +1,5 @@
 import asyncpg
 import sys
-from mysql.connector import Error
 import yaml
 import numpy as np
 import faiss
@@ -22,24 +21,27 @@ class ImageEmbeddingContainer:
 class Discover:
     stop_indexer = False
     index = None
-    pool = None
+    api_pool = None
+    update_pool = None
 
     # 0. Initialize
     async def setup_db(self, config_path):
-        await self.initialize_db_pool(config_path)
+        await self.initialize_api_pool(config_path)
         await self.create_faiss_mapping_table()
         await self.create_content_moderation_table()
 
     # 1. DB functions
-    async def initialize_db_pool(self, config_path):
+    async def initialize_api_pool(self, config_path):
         config = yaml.safe_load(open(config_path))
-        pool = await asyncpg.create_pool(host=config["db_host"], user=config["db_user"], database=config["db_name"], password=config["db_password"])
-        self.pool = pool
-        return pool
+        self.api_pool = await asyncpg.create_pool(host=config["db_host"], user=config["db_user"], database=config["db_name"], password=config["db_password"])
+
+    async def initialize_update_pool(self, config_path):
+        config = yaml.safe_load(open(config_path))
+        self.update_pool = await asyncpg.create_pool(host=config["db_host"], user=config["db_user"], database=config["db_name"], password=config["db_password"])
 
     async def create_faiss_mapping_table(self):
         try:
-            async with self.pool.acquire() as conn:
+            async with self.api_pool.acquire() as conn:
                 await conn.execute("""CREATE TABLE IF NOT EXISTS faiss (
                 sha256 varchar(80) not null primary key,
                 faiss_id int not null
@@ -51,7 +53,7 @@ class Discover:
 
     async def create_content_moderation_table(self):
         try:
-            async with self.pool.acquire() as conn:
+            async with self.api_pool.acquire() as conn:
                 await conn.execute("""CREATE TABLE IF NOT EXISTS content_moderation (            
                 content_id int,
                 sha256 varchar(80) not null primary key,
@@ -67,7 +69,7 @@ class Discover:
 
     async def insert_faiss_mapping(self, mappings):
         try:
-            async with self.pool.acquire() as conn:
+            async with self.update_pool.acquire() as conn:
                 query = "INSERT INTO faiss (sha256, faiss_id) VALUES ($1, $2) ON CONFLICT (sha256) DO UPDATE SET faiss_id = EXCLUDED.faiss_id"
                 await conn.executemany(query, mappings)
         except Exception as e:
@@ -75,7 +77,7 @@ class Discover:
 
     async def insert_moderation_flag(self, moderation_details):
         try:
-            async with self.pool.acquire() as conn:
+            async with self.update_pool.acquire() as conn:
                 query = """INSERT INTO content_moderation (content_id, sha256, automated_moderation_flag, flagged_concept, cosine_distance) VALUES ($1, $2, $3, $4, $5) 
                 ON CONFLICT (sha256) DO UPDATE SET content_id=EXCLUDED.content_id, automated_moderation_flag=EXCLUDED.automated_moderation_flag, flagged_concept=EXCLUDED.flagged_concept, cosine_distance=EXCLUDED.cosine_distance"""
                 await conn.executemany(query, moderation_details)
@@ -84,7 +86,7 @@ class Discover:
 
     async def insert_moderation_overrides(self, moderation_details):
         try:
-            async with self.pool.acquire() as conn:
+            async with self.update_pool.acquire() as conn:
                 query = """INSERT INTO content_moderation (sha256, human_override_moderation_flag, human_override_reason) VALUES ($1, $2, $3) 
                 ON DUPLICATE KEY UPDATE human_override_moderation_flag=VALUES(human_override_moderation_flag), human_override_reason=VALUES(human_override_reason)"""
                 await conn.executemany(query, moderation_details)
@@ -93,20 +95,20 @@ class Discover:
 
     async def delete_blocked_content(self, blocked_shas):
         try:
-            async with self.pool.acquire() as conn:
+            async with self.update_pool.acquire() as conn:
                 query = 'UPDATE content SET content = null where sha256=$1'
                 await conn.executemany(query, blocked_shas)
         except Exception as e:
             print(f"Unexpected error: {e}")
 
     async def get_last_valid_faiss_id(self):
-        async with self.pool.acquire() as conn:
+        async with self.update_pool.acquire() as conn:
             row = await conn.fetchrow('select min(previous) from (select faiss_id, Lag(faiss_id,1) over (order BY faiss_id) as previous from faiss) a where faiss_id != previous+1')
         last_valid_id_in_db = row[0]
         return last_valid_id_in_db
 
     async def get_faiss_db_length(self):
-        async with self.pool.acquire() as conn:
+        async with self.update_pool.acquire() as conn:
             row = await conn.fetchrow('select count(*) from faiss')
         if row is None or row[0] is None:
             db_length = 0
@@ -115,7 +117,7 @@ class Discover:
         return db_length
 
     async def get_last_faiss_id_in_db(self):
-        async with self.pool.acquire() as conn:
+        async with self.update_pool.acquire() as conn:
             row = await conn.fetchrow('select max(faiss_id) from faiss')
         if row is None or row[0] is None:
             last_faiss_id_in_db = -1
@@ -125,7 +127,7 @@ class Discover:
 
     async def delete_from_faiss_db(self, last_valid_id):
         try:
-            async with self.pool.acquire() as conn:
+            async with self.update_pool.acquire() as conn:
                 await conn.execute('Delete from faiss where faiss_id>$1', last_valid_id)
                 print("Deleted extra faiss ids from db past: " + str(last_valid_id))
         except Exception as e:
@@ -165,12 +167,12 @@ class Discover:
             print("DB length: " + str(db_length) + " Faiss length: " + str(self.index.ntotal))
             print("DB last id: " + str(last_faiss_id_in_db) + " Faiss last id: " + str(self.index.ntotal-1))
             return self.index.ntotal-1
-        except Error as e:
+        except Exception as e:
             print("Error while reconciling faiss_ids", e)
 
     async def get_last_insert_content_id(self):
         try:
-            async with self.pool.acquire() as conn:
+            async with self.update_pool.acquire() as conn:
                 row = await conn.fetchrow('select max(content_id) from content where sha256 in (select sha256 from faiss where faiss_id in (select max(faiss_id) from faiss))')
             if row is None or row[0] is None:
                 return -1
@@ -181,7 +183,7 @@ class Discover:
 
     async def get_image_list(self, start_number):
         try:
-            async with self.pool.acquire() as conn:
+            async with self.update_pool.acquire() as conn:
                 rows = await conn.fetch('select content_id, sha256, content, content_type from content where content_id >= $1 order by content_id limit 1000', start_number)
                 return rows
         except Exception as e:
@@ -189,7 +191,7 @@ class Discover:
 
     async def get_shas_by_faiss_id(self, faiss_ids):
         try:
-            async with self.pool.acquire() as conn:
+            async with self.api_pool.acquire() as conn:
                 formatted_ids = ", ".join([str(v) for v in faiss_ids])
                 rows = await conn.fetch('select sha256, faiss_id from faiss where faiss_id in ({li}) order by array_position(array[{li}], faiss_id)'.format(li=formatted_ids))
                 return rows
@@ -198,12 +200,11 @@ class Discover:
 
     async def get_numbers_by_faiss_id(self, faiss_ids):
         try:
-            async with self.pool.acquire() as conn:
+            async with self.api_pool.acquire() as conn:
                 formatted_ids = ", ".join([str(v) for v in faiss_ids])
                 query = """with a as (select o.*, f.faiss_id from faiss f left join ordinals o on f.sha256=o.sha256 where f.faiss_id in ({li})),
                            b as (select min(sequence_number) as sequence_number from a group by sha256)
                            select a.* from a, b where a.sequence_number in (b.sequence_number) order by array_position(array[{li}], faiss_id)"""
-                print(query.format(li=formatted_ids))
                 rows = await conn.fetch(query.format(li=formatted_ids))
                 return rows
         except Exception as e:
@@ -211,22 +212,22 @@ class Discover:
 
     async def get_numbers_by_dbclass(self, dbclass, n):
         try:
-            async with self.pool.acquire() as conn:
+            async with self.api_pool.acquire() as conn:
                 query = """with a as (select sha256 from dbscan where dbscan_class = $1 limit $2), 
                        b as (select min(sequence_number) as sequence_number from ordinals o, a where o.sha256 in (a.sha256) group by o.sha256)
                        select o.* from ordinals o, b where o.sequence_number in (b.sequence_number)"""
-                rows = await conn.execute(query, (dbclass, n))
+                rows = await conn.fetch(query, (dbclass, n))
                 return rows
         except Exception as e:
             print("Error while retrieving numbers by dbclass", e)
 
     async def get_content_from_sha(self, sha256):
         try:
-            async with self.pool.acquire() as conn:
-                rows = await conn.execute('select sha256, content, content_type from content where sha256=\"{sha}\"'.format(sha=sha256))
+            async with self.api_pool.acquire() as conn:
+                rows = await conn.fetchrow('select sha256, content, content_type from content where sha256=\'{sha}\''.format(sha=sha256))
                 return rows
         except Exception as e:
-            print("Error while retrieving last_insert", e)
+            print("Error while retrieving content", e)
 
     # 2. Index functions
     def get_index(self, d):
@@ -411,8 +412,9 @@ class Discover:
     def write_index(self):
         faiss.write_index(self.index, "ivf_index.bin")
 
-    async def update_index(self, model):
+    async def update_index(self, model, config_path):
         print("Indexer starting in background..")
+        await self.initialize_update_pool(config_path)
         await self.reconcile_index_with_db()
         last_content_id = await self.get_last_insert_content_id()
         last_retrain_id = last_content_id
@@ -489,10 +491,8 @@ class Discover:
         t1 = time.time()
         D, I = self.index.search(query_emb, n)
         t2 = time.time()
-        rows = await self.get_numbers_by_faiss_id(I[0])
-        print("rows found:")
-        print(rows)
-        zipped = list(map(lambda x, y: (x + (float(y),)), rows, D[0]))
+        records = await self.get_numbers_by_faiss_id(I[0])
+        zipped = list(map(lambda record, distance: {**dict(record), "distance": distance}, records, D[0].tolist()))
         t3 = time.time()
         print("db: " + str(t3-t2) + ". index: " + str(t2-t1) + ". encode: " + str(t1-t0))
         return zipped
@@ -504,36 +504,41 @@ class Discover:
         t1 = time.time()
         D, I = self.index.search(image_emb, n)
         t2 = time.time()
-        rows = await self.get_numbers_by_faiss_id(I[0])
-        zipped = list(map(lambda x, y: (x + (float(y),)), rows, D[0]))
+        records = await self.get_numbers_by_faiss_id(I[0])
+        zipped = list(map(lambda record, distance: {**dict(record), "distance": distance}, records, D[0].tolist()))
         t3 = time.time()
         print("db: " + str(t3-t2) + ". index: " + str(t2-t1) + ". encode: " + str(t1-t0))
         return zipped
 
     async def get_dbclass_to_inscription_numbers(self, dbclass, n):
         t0 = time.time()
-        rows = await self.get_numbers_by_dbclass(dbclass, n)
+        records = await self.get_numbers_by_dbclass(dbclass, n)
+        zipped = list(map(lambda record: dict(record), records))
         t1 = time.time()
         print("db: " + str(t1 - t0))
-        return rows
+        return zipped
 
     async def get_similar_images(self, model, sha256, n=5):
         t0 = time.time()
         rows = await self.get_content_from_sha(sha256)
-        binary_content = rows[0][1]
-        content_type = rows[0][2]
+        binary_content = rows["content"]
+        content_type = rows["content_type"]
         if "image/" in content_type and "svg" not in content_type:
             t1 = time.time()
             image_stream = BytesIO(binary_content)
             try:
+                s1 = time.time()
                 image = Image.open(image_stream)
+                s2 = time.time()
                 image_emb = model.encode([image])
+                s3 = time.time()
                 D, I = self.index.search(image_emb, n)
                 t2 = time.time()
-                rows = await self.get_numbers_by_faiss_id(I[0])
-                zipped = list(map(lambda x, y: (x + (float(y),)), rows, D[0]))
+                records = await self.get_numbers_by_faiss_id(I[0])
+                zipped = list(map(lambda record, distance: {**dict(record), "distance": distance}, records, D[0].tolist()))
                 t3 = time.time()
                 print("db1: " + str(t1 - t0) + ". index: " + str(t2 - t1) + ". db2: " + str(t3 - t2))
+                print("open: " + str(s2 - s1) + ". encode: " + str(s3 - s2) + ". search: " + str(t2 - s3))
                 return zipped
             except UnidentifiedImageError as e:
                 print("Couldn't open sha256: " + sha256 + ". Not a valid image")
