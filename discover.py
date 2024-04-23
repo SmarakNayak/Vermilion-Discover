@@ -280,7 +280,7 @@ class Discover:
         concept_embeddings = model.encode(combined_concepts)
         cos_scores = util.cos_sim(embedding_container.image_embeddings, concept_embeddings)
 
-        THRESHOLD = 0.27
+        THRESHOLD = 0.24
         # check if any concepts are above threshold
         max_score = torch.amax(cos_scores, 1)
         clean_index = (max_score < THRESHOLD).tolist()
