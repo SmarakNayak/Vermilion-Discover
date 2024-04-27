@@ -23,6 +23,7 @@ class Discover:
     index = None
     api_pool = None
     update_pool = None
+    nprobe = 16
 
     # 0. Initialize
     async def setup_db(self, config_path):
@@ -445,6 +446,7 @@ class Discover:
         print("Indexer starting in background..")
         await self.initialize_update_pool(config_path)
         await self.reconcile_index_with_db()
+        self.update_nprobe()
         last_content_id = await self.get_last_insert_content_id()
         last_retrain_id = last_content_id
         while True:
@@ -495,9 +497,12 @@ class Discover:
         new_index.train(embeddings)
         print("Adding")
         new_index.add(embeddings)
-        new_index.nprobe=10
+        new_index.nprobe = self.nprobe
         print("Finished")
         self.index = new_index
+
+    def update_nprobe(self):
+        self.index.nprobe = self.nprobe
 
     async def get_text_to_image_shas(self, model, search_term, n=5):
         query_emb = model.encode([search_term])
