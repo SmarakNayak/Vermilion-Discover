@@ -232,11 +232,9 @@ class Discover:
         try:
             async with self.api_pool.acquire() as conn:
                 formatted_ids = ", ".join([str(v) for v in faiss_ids])
-                query = """select o.*, f.faiss_id from faiss f 
-                           left join content c on f.sha256=c.sha256
-                           left join ordinals o on c.content_id=o.sequence_number 
-                           where f.faiss_id in ({li})
-                           order by array_position(array[{li}], faiss_id)"""
+                query = """with a as (select o.*, f.faiss_id from faiss f left join ordinals o on f.sha256=o.sha256 where f.faiss_id in ({li})),
+                           b as (select min(sequence_number) as sequence_number from a group by sha256)
+                           select a.* from a, b where a.sequence_number in (b.sequence_number) order by array_position(array[{li}], faiss_id)"""
                 rows = await conn.fetch(query.format(li=formatted_ids))
                 return rows
         except Exception as e:
