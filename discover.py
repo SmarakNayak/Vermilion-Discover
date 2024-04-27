@@ -23,7 +23,7 @@ class Discover:
     index = None
     api_pool = None
     update_pool = None
-    nprobe = 16
+    nprobe = 32
 
     # 0. Initialize
     async def setup_db(self, config_path):
