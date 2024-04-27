@@ -235,7 +235,7 @@ class Discover:
                 query = """select o.*, f.faiss_id from faiss f 
                            left join content c on f.sha256=c.sha256
                            left join ordinals o on c.content_id=o.sequence_number 
-                           where f.faiss_id in ({li}))
+                           where f.faiss_id in ({li})
                            order by array_position(array[{li}], faiss_id)"""
                 rows = await conn.fetch(query.format(li=formatted_ids))
                 return rows
